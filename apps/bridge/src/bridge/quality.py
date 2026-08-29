@@ -8,6 +8,14 @@ independent of how the phone is carried.
 A detection run on a recording that fails those checks is not evidence about the
 idea, it is evidence about the recording, so the CLI reports the verdict *before*
 the detections and marks the detections untrustworthy when the capture is unfit.
+
+Sample rate is graded rather than binary. A seeded sweep over 20 routes shows
+precision holds (≥0.94) all the way down to 40 Hz while recall halves below
+100 Hz (0.33-0.67 vs 0.73 at 100 Hz and 0.83 at 200 Hz): a slow capture makes
+the detector *miss* defects, it does not make it invent them. Withholding those
+findings threw away sound evidence, so ``FLOOR_FS_HZ``..``MIN_FS_HZ`` is now
+degraded-but-reported and only a rate that puts the whole 20-45 Hz shock band
+above Nyquist is unusable.
 """
 
 from __future__ import annotations
@@ -21,7 +29,9 @@ from imukit.preprocess import G, lowpass
 from .ingest import Recording
 
 MIN_FS_HZ = 100.0
+FLOOR_FS_HZ = 50.0
 WARN_FS_HZ = 150.0
+SHOCK_BAND_HZ = (20.0, 45.0)
 MAX_GPS_ERR_M = 3.0
 WARN_GPS_ERR_M = 5.0
 MIN_DURATION_S = 30.0
@@ -29,6 +39,12 @@ MAX_DROPOUT_FRAC = 0.02
 GRAVITY_CUTOFF_HZ = 0.4
 GRAVITY_BAND_G = (0.5, 2.0)
 VERDICTS = ("ok", "degraded", "unusable")
+
+
+def _shock_band_covered(fs: float) -> float:
+    """Fraction of the shock band that survives sampling at ``fs`` (Nyquist-limited)."""
+    lo, hi = SHOCK_BAND_HZ
+    return float(np.clip((fs / 2.0 - lo) / (hi - lo), 0.0, 1.0))
 
 
 def _dc_magnitude(accel: np.ndarray, fs: float) -> float:
@@ -53,6 +69,7 @@ class CaptureQuality:
     gravity_present: bool
     clipping_frac: float
     gps_present: bool
+    shock_band_covered_frac: float
     gps_rate_hz: float | None
     gps_accuracy_m: float | None
     route_length_m: float | None
@@ -63,6 +80,11 @@ class CaptureQuality:
     @property
     def usable(self) -> bool:
         return self.verdict != "unusable"
+
+    @property
+    def rate_limited(self) -> bool:
+        """Usable, but sampled too slowly to see the whole shock band."""
+        return self.usable and self.fs_hz < MIN_FS_HZ
 
     def as_dict(self) -> dict:
         d = {k: v for k, v in self.__dict__.items()}
@@ -97,13 +119,25 @@ def assess(rec: Recording) -> CaptureQuality:
         gravity_present=bool(lo_g * G < dc_mag < hi_g * G),
         clipping_frac=float(np.mean(np.max(np.abs(rec.trace.accel), axis=1) >= 4 * G)),
         gps_present=rec.gps is not None,
+        shock_band_covered_frac=_shock_band_covered(fs),
         gps_rate_hz=None,
         gps_accuracy_m=None,
         route_length_m=None,
     )
 
-    if fs < MIN_FS_HZ:
-        _fail(q, f"IMU sampled at {fs:.0f} Hz; ≥{MIN_FS_HZ:.0f} Hz is required (E5: F1 0.50 at 50 Hz)")
+    if fs < FLOOR_FS_HZ:
+        _fail(
+            q,
+            f"IMU sampled at {fs:.0f} Hz; below {FLOOR_FS_HZ:.0f} Hz the whole {SHOCK_BAND_HZ[0]:.0f}-"
+            f"{SHOCK_BAND_HZ[1]:.0f} Hz shock band is above Nyquist, so there is nothing to detect",
+        )
+    elif fs < MIN_FS_HZ:
+        _warn(
+            q,
+            f"IMU at {fs:.0f} Hz covers {q.shock_band_covered_frac * 100:.0f}% of the "
+            f"{SHOCK_BAND_HZ[0]:.0f}-{SHOCK_BAND_HZ[1]:.0f} Hz shock band; findings stay precise but "
+            f"about half of them are missed (E5: F1 0.50 at 50 Hz vs 0.80 at 100 Hz)",
+        )
     elif fs < WARN_FS_HZ:
         _warn(q, f"IMU at {fs:.0f} Hz is the minimum viable rate; 200 Hz keeps the 20-80 Hz shock band")
     if q.duration_s < MIN_DURATION_S:

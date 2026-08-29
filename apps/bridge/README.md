@@ -16,7 +16,7 @@ apps/bridge/
   src/bridge/pipeline.py     resample -> vertical projection -> cadence -> residual -> windows
   src/bridge/detect.py       single-pass, multi-pass and modal-shift detectors
   src/bridge/evaluate.py     precision/recall/localization/AUC against ground truth
-  src/bridge/experiments.py  E1-E5 feasibility experiments (seeded)
+  src/bridge/experiments.py  E1-E6 feasibility experiments (seeded)
   src/bridge/cli.py          `scan`, `run`, `demo`, `plot`
   tests/                     35 tests (pytest)
   docs/FEASIBILITY.md            feasibility study, findings, limitations, plan
@@ -34,7 +34,7 @@ pip install -e ../../libs/imukit -e '.[dev]'   # or: PYTHONPATH=src:../../libs/i
 python -m pytest -q
 python -m bridge.cli scan --demo     # end-to-end on a generated recording
 python -m bridge.cli demo            # one simulated pass + detections
-python -m bridge.cli run all         # E1-E5, writes docs/results/results.json
+python -m bridge.cli run all         # E1-E6, writes docs/results/results.json
 python -m bridge.cli plot            # docs/results/single_pass_scores.png
 python -m ruff check . ../../libs/imukit
 ```
@@ -66,8 +66,11 @@ python -m bridge.cli scan accel.csv --gps gps.csv --threshold 2.5
 (`Accelerometer.csv` + `Location.csv`, comma or semicolon), or a generic CSV with a
 time column plus x/y/z acceleration and an optional `t,lat,lon[,accuracy_m]` GPS CSV.
 The accelerometer stream must still contain **gravity** - the vertical projection
-needs it - and must be sampled at **>=100 Hz** with GPS accuracy **<=3 m**, the two
-requirements E5 in the feasibility study derived.
+needs it - and should be sampled at **>=100 Hz** with GPS accuracy **<=3 m**, the two
+requirements E5 in the feasibility study derived. Sample rate is graded rather than
+gating: 50-100 Hz is scanned as `degraded` because E6 shows precision holds there
+while recall roughly halves, and only below 50 Hz - where the whole 20-45 Hz shock
+band is above Nyquist - is a recording refused.
 
 **Output.** A printed report, plus `--out` in `json` (full result incl. quality
 metrics), `csv`, or `geojson` (`ROUGH_SURFACE` points ready for the Sidewalk Map

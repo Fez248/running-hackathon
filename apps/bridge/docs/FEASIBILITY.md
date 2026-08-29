@@ -118,6 +118,25 @@ Two hard requirements fall out of this: **≥100 Hz sampling** and **GPS error
 smeared across bins and localization collapses entirely even though the anomaly
 is still *visible* in the residual.
 
+### E6 — what a slow capture actually costs (precision vs recall, 5 seeds)
+| sample rate | precision | recall |
+| --- | --- | --- |
+| 40 Hz | 1.00 | 0.33 |
+| 50 Hz | 1.00 | 0.33 |
+| 60 Hz | 1.00 | 0.67 |
+| 75 Hz | 1.00 | 0.33 |
+| 100 Hz | 0.95 | 0.73 |
+| 200 Hz | 1.00 | 0.80 |
+
+E5's F1 collapse below 100 Hz is **entirely a recall collapse**: whatever a slow
+capture does report is as trustworthy as at 200 Hz, it just misses defects,
+because each halving of the rate removes more of the 20-45 Hz shock band. The
+capture gate therefore grades sample rate instead of rejecting on it — 50-100 Hz
+is `degraded` and reported with a "half the defects are missed" note, and only
+below 50 Hz, where the whole shock band is above Nyquist, is a pass unusable.
+(The non-monotonicity at 60 vs 75 Hz is a one-event scenario artifact on a
+3-anomaly route, as in E5.)
+
 ## 4. Assumptions
 
 1. The baseline surface dominates the route (single-pass mode only). A route that

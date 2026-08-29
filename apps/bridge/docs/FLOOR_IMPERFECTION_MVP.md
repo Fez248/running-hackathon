@@ -16,7 +16,7 @@ quality gate in front of it.
 ```
 recording (Sensor Logger / phyphox / CSV)
   -> ingest        parse, unify clocks, build ImuTrace + GpsTrack
-  -> quality gate  ≥100 Hz? gravity present? GPS ≤3 m? ≥30 s?   -> verdict
+  -> quality gate  ≥50 Hz (≥100 to be ungraded)? gravity? GPS ≤3 m? ≥30 s? -> verdict
   -> pipeline      cadence suppression -> residual -> windowed features
   -> detect        robust z, excess / attenuation panels
   -> findings      distance + lat/lon + confidence -> JSON / CSV / GeoJSON
@@ -48,7 +48,8 @@ Logger shaped export, then reads that export back and scans it. Committed output
 | 200 Hz, GPS 3 m | ok | 2 | 1.00 | 0.67 | 5.8 m |
 | 100 Hz, GPS 3 m | degraded | 2 | 1.00 | 0.67 | 5.1 m |
 | 200 Hz, `--threshold 2.5` | ok | 5 | 0.60 | 1.00 | 5.7 m |
-| 50 Hz, GPS 3 m | **unusable** | withheld | — | — | — |
+| 60 Hz, GPS 3 m | degraded | 2 | 1.00 | 0.67 | 10.6 m |
+| 40 Hz, GPS 3 m | **unusable** | withheld | — | — | — |
 | 200 Hz, GPS 8 m | **unusable** | withheld | — | — | — |
 
 Two things are worth reading off this table. First, the file round-trip is
