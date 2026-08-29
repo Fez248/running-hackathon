@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bridge"
+version = "0.1.0"
+description = "Feet as a sensor network: surface & structural anomaly detection from phone IMU + GPS"
+requires-python = ">=3.10"
+dependencies = ["numpy>=2.0", "scipy>=1.10", "imukit"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5", "matplotlib>=3.7"]
+
+[project.scripts]
+bridge = "bridge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+imukit = { path = "../../libs/imukit", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../../libs/imukit/src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
