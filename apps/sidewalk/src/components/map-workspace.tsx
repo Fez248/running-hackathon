@@ -229,13 +229,6 @@ export function MapWorkspace() {
 
   const markers = useMemo(() => reports.data ?? [], [reports.data]);
   const fogCells = useMemo(() => coverage.data ?? [], [coverage.data]);
-  const liveHole = runTracker.position
-    ? {
-        lat: runTracker.position.lat,
-        lng: runTracker.position.lng,
-        radiusM: runTracker.revealRadiusM,
-      }
-    : null;
 
   return (
     <main className="layout">
@@ -251,7 +244,7 @@ export function MapWorkspace() {
           enabled: fogEnabled,
           cells: fogCells,
           pendingBounds: runTracker.localBounds,
-          liveHole,
+          recording: running,
         }}
         runPath={runTracker.path}
         livePosition={runTracker.position}

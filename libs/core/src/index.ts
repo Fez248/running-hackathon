@@ -4,6 +4,7 @@ export * from './passability';
 export * from './scoring';
 export * from './transformer';
 export * from './fog';
+export * from './fog-reveal';
 export * from './gps';
 export * from './location-consent';
 export * from './voice';

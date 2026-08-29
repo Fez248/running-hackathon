@@ -62,7 +62,7 @@ interface MapViewProps {
     enabled: boolean;
     cells: FogCell[];
     pendingBounds: FogBounds[];
-    liveHole: { lat: number; lng: number; radiusM: number } | null;
+    recording: boolean;
   };
   runPath: Coordinate[];
   livePosition: (Coordinate & { accuracyM: number | null }) | null;
@@ -155,7 +155,7 @@ export function MapView({
         <FogLayer
           cells={fog.cells}
           pendingBounds={fog.pendingBounds}
-          liveHole={fog.liveHole}
+          recording={fog.recording}
           opacity={0.82}
           visible={fog.enabled}
         />

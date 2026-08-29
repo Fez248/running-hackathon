@@ -54,6 +54,19 @@ describe('fogCellsAround', () => {
     expect(fogCellsAround(CENTER, 60).length).toBeGreaterThan(fogCellsAround(CENTER, 15).length);
   });
 
+  it('returns the cell the runner stands in first, then outwards', () => {
+    const keys = fogCellsAround(CENTER, DEFAULT_REVEAL_RADIUS_M);
+    expect(keys[0]).toBe(fogCellKey(CENTER));
+    const distances = keys.slice(1).map((key) => {
+      const bounds = fogCellBounds(fogCellIndexFromKey(key)!);
+      return distanceMeters(CENTER, {
+        lat: (bounds.minLat + bounds.maxLat) / 2,
+        lng: (bounds.minLng + bounds.maxLng) / 2,
+      });
+    });
+    expect([...distances].sort((a, b) => a - b)).toEqual(distances);
+  });
+
   it('never reveals a cell centre outside the radius', () => {
     for (const key of fogCellsAround(CENTER, DEFAULT_REVEAL_RADIUS_M)) {
       const index = fogCellIndexFromKey(key);
