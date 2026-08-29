@@ -92,6 +92,8 @@ export function MapWorkspace() {
   /** Voice reports are geocoded to the latest accepted GPS fix. */
   const positionRef = useRef(runTracker.position);
   positionRef.current = runTracker.position;
+  const traceIdRef = useRef(runTracker.traceId);
+  traceIdRef.current = runTracker.traceId;
 
   const createFromVoice = api.report.createFromVoice.useMutation({
     onSuccess: (result) => {
@@ -123,6 +125,7 @@ export function MapWorkspace() {
         accuracyM: position.accuracyM ?? undefined,
         recognitionConfidence: utterance.recognitionConfidence ?? undefined,
         capturedByProfile: profile,
+        traceId: traceIdRef.current ?? undefined,
         clientReportId: utterance.id,
       });
     },

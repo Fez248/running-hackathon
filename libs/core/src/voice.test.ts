@@ -21,6 +21,12 @@ describe('parseVoiceReport', () => {
     expect(parseVoiceReport('curb around fifteen centimetres')?.heightCm).toBe(15);
   });
 
+  it('composes spelled-out tens and hundreds', () => {
+    expect(parseVoiceReport('curb twenty five centimetres')?.heightCm).toBe(25);
+    expect(parseVoiceReport('curb one hundred centimetres')?.heightCm).toBe(100);
+    expect(parseVoiceReport('curb one hundred and twenty five centimetres')?.heightCm).toBe(125);
+  });
+
   it('prefers the longest matching phrase', () => {
     expect(parseVoiceReport('nice dropped kerb here')).toMatchObject({
       kind: 'CROSSING',

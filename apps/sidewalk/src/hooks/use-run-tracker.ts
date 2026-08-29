@@ -38,6 +38,23 @@ export interface RunStatus {
 const REVEAL_FLUSH_MS = 3_000;
 const REVEAL_FLUSH_POINTS = 8;
 
+/**
+ * All mutable run state lives in one object per run, so a `stop` that is still
+ * awaiting the network cannot touch the state of a run started after it.
+ */
+interface RunState {
+  id: number;
+  filter: GpsFilter;
+  pending: Coordinate[];
+  pendingAccuracyM: number | null;
+  path: Coordinate[];
+  traceId: string | null;
+  tracePromise: Promise<string | null> | null;
+  inFlightFlush: Promise<void> | null;
+  watchId: number | null;
+  flushTimer: ReturnType<typeof setInterval> | null;
+}
+
 export interface UseRunTrackerOptions {
   revealRadiusM?: number;
   onRevealed?: () => void;
@@ -61,16 +78,9 @@ export function useRunTracker({
   const [path, setPath] = useState<Coordinate[]>([]);
   const [localCellKeys, setLocalCellKeys] = useState<string[]>([]);
 
-  const watchIdRef = useRef<number | null>(null);
-  const filterRef = useRef<GpsFilter | null>(null);
-  const pendingRef = useRef<Coordinate[]>([]);
-  const pendingAccuracyRef = useRef<number | null>(null);
-  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const traceIdRef = useRef<string | null>(null);
-  const tracePromiseRef = useRef<Promise<string | null> | null>(null);
-  const pathRef = useRef<Coordinate[]>([]);
-  const inFlightFlushRef = useRef<Promise<void> | null>(null);
-  /** Bumped on every start/stop so callbacks of a finished run can't write refs. */
+  const [traceId, setTraceId] = useState<string | null>(null);
+
+  const runRef = useRef<RunState | null>(null);
   const runIdRef = useRef(0);
 
   const reveal = api.coverage.reveal.useMutation({
@@ -81,75 +91,88 @@ export function useRunTracker({
   const revealRef = useRef(reveal);
   revealRef.current = reveal;
 
-  const flush = useCallback(async (): Promise<void> => {
-    // Serialised: overlapping flushes would reorder points and lose retries.
-    if (inFlightFlushRef.current) return inFlightFlushRef.current;
-    const points = pendingRef.current;
-    if (points.length === 0) return;
-    pendingRef.current = [];
-    const accuracyM = pendingAccuracyRef.current ?? undefined;
-    pendingAccuracyRef.current = null;
+  const flush = useCallback(
+    async (run: RunState): Promise<void> => {
+      // Serialised: overlapping flushes would reorder points and lose retries.
+      if (run.inFlightFlush) return run.inFlightFlush;
+      if (run.pending.length === 0) return;
 
-    const run = (async () => {
-      try {
-        await revealRef.current.mutateAsync({
-          points,
-          revealRadiusM,
-          accuracyM,
-          traceId: traceIdRef.current ?? undefined,
-        });
-      } catch {
-        // Requeue ahead of anything accepted meanwhile, so a transient outage
-        // delays coverage instead of losing it.
-        pendingRef.current = [...points, ...pendingRef.current];
-        if (accuracyM != null) {
-          pendingAccuracyRef.current = Math.min(
-            pendingAccuracyRef.current ?? Number.POSITIVE_INFINITY,
-            accuracyM,
-          );
-        }
-      } finally {
-        inFlightFlushRef.current = null;
-      }
-    })();
-    inFlightFlushRef.current = run;
-    return run;
-  }, [revealRadiusM]);
-
-  const stop = useCallback(
-    async () => {
-      runIdRef.current += 1;
-      if (watchIdRef.current != null && typeof navigator !== 'undefined') {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
-      }
-      if (flushTimerRef.current) {
-        clearInterval(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      setStatus((s) => ({ ...s, active: false }));
-
-      // The trace may still be opening: awaiting it keeps the last flush and the
-      // close attributed to this run rather than orphaning them.
-      const traceId = traceIdRef.current ?? (await tracePromiseRef.current) ?? null;
-      traceIdRef.current = traceId;
-      // Awaited so the last fixes are persisted before the trace is closed.
-      await flush();
-      await inFlightFlushRef.current;
-      traceIdRef.current = null;
-      tracePromiseRef.current = null;
-
-      const points = pathRef.current;
-      if (traceId && points.length >= 1) {
+      const send = (async () => {
         try {
-          await finishTrace.mutateAsync({ traceId, points });
-        } catch {
-          // A failed trace close must not lose the run: the fog is already saved.
+          // The trace opens alongside the first fixes; waiting for it keeps the
+          // whole run's coverage attributed to the run that collected it.
+          if (!run.traceId && run.tracePromise) await run.tracePromise;
+
+          // Drains points queued while a request was in flight, so stopping
+          // never leaves coverage behind.
+          while (run.pending.length > 0) {
+            const points = run.pending;
+            run.pending = [];
+            const accuracyM = run.pendingAccuracyM ?? undefined;
+            run.pendingAccuracyM = null;
+            try {
+              await revealRef.current.mutateAsync({
+                points,
+                revealRadiusM,
+                accuracyM,
+                traceId: run.traceId ?? undefined,
+              });
+            } catch {
+              // Requeue ahead of anything accepted meanwhile, so a transient
+              // outage delays coverage instead of losing it.
+              run.pending = [...points, ...run.pending];
+              if (accuracyM != null) {
+                run.pendingAccuracyM = Math.min(
+                  run.pendingAccuracyM ?? Number.POSITIVE_INFINITY,
+                  accuracyM,
+                );
+              }
+              break;
+            }
+          }
+        } finally {
+          run.inFlightFlush = null;
         }
-      }
+      })();
+      run.inFlightFlush = send;
+      return send;
     },
-    [flush, finishTrace],
+    [revealRadiusM],
   );
+
+  const stop = useCallback(async () => {
+    const run = runRef.current;
+    runRef.current = null;
+    setStatus((s) => ({ ...s, active: false }));
+    setTraceId(null);
+    if (!run) return;
+
+    if (run.watchId != null && typeof navigator !== 'undefined') {
+      navigator.geolocation.clearWatch(run.watchId);
+      run.watchId = null;
+    }
+    if (run.flushTimer) {
+      clearInterval(run.flushTimer);
+      run.flushTimer = null;
+    }
+
+    // The trace may still be opening: awaiting it keeps the last flush and the
+    // close attributed to this run rather than orphaning them.
+    run.traceId = run.traceId ?? (await run.tracePromise) ?? null;
+    // Retried so the last fixes are persisted before the trace is closed; the
+    // flush timer is gone, so nothing else would pick them up.
+    for (let attempt = 0; attempt < 3 && run.pending.length > 0; attempt += 1) {
+      await flush(run);
+    }
+
+    if (run.traceId && run.path.length >= 1) {
+      try {
+        await finishTrace.mutateAsync({ traceId: run.traceId, points: run.path });
+      } catch {
+        // A failed trace close must not lose the run: the fog is already saved.
+      }
+    }
+  }, [flush, finishTrace]);
   const stopRef = useRef(stop);
   stopRef.current = stop;
 
@@ -158,13 +181,13 @@ export function useRunTracker({
    * that never gets GPS (permission denied, no signal) leaves no empty trace.
    */
   const ensureTrace = useCallback(
-    (runId: number) => {
-      if (tracePromiseRef.current) return;
-      tracePromiseRef.current = startTrace
+    (run: RunState) => {
+      if (run.tracePromise) return;
+      run.tracePromise = startTrace
         .mutateAsync({ startedAt: new Date() })
         .then((trace) => {
-          if (runIdRef.current !== runId) return null;
-          traceIdRef.current = trace.id;
+          run.traceId = trace.id;
+          if (runRef.current === run) setTraceId(trace.id);
           return trace.id;
         })
         .catch(() => null);
@@ -182,14 +205,21 @@ export function useRunTracker({
       return;
     }
 
-    const runId = runIdRef.current + 1;
-    runIdRef.current = runId;
-    filterRef.current = createGpsFilter();
-    pendingRef.current = [];
-    pendingAccuracyRef.current = null;
-    traceIdRef.current = null;
-    tracePromiseRef.current = null;
-    pathRef.current = [];
+    runIdRef.current += 1;
+    const run: RunState = {
+      id: runIdRef.current,
+      filter: createGpsFilter(),
+      pending: [],
+      pendingAccuracyM: null,
+      path: [],
+      traceId: null,
+      tracePromise: null,
+      inFlightFlush: null,
+      watchId: null,
+      flushTimer: null,
+    };
+    runRef.current = run;
+    setTraceId(null);
     setPosition(null);
     setPath([]);
     setLocalCellKeys([]);
@@ -202,10 +232,10 @@ export function useRunTracker({
       distanceM: 0,
     }));
 
-    watchIdRef.current = navigator.geolocation.watchPosition(
+    run.watchId = navigator.geolocation.watchPosition(
       (fix) => {
-        const filter = filterRef.current;
-        if (!filter) return;
+        if (runRef.current !== run) return;
+        const { filter } = run;
         const result = filter.push({
           lat: fix.coords.latitude,
           lng: fix.coords.longitude,
@@ -224,19 +254,16 @@ export function useRunTracker({
           return;
         }
 
-        ensureTrace(runId);
+        ensureTrace(run);
         const point = { lat: result.fix.lat, lng: result.fix.lng };
-        pendingRef.current.push(point);
-        pathRef.current = [...pathRef.current, point];
+        run.pending = [...run.pending, point];
+        run.path = [...run.path, point];
         // Only accepted, smoothed fixes move the runner: voice geocoding, the
         // live fog hole and map following all read this position.
         setPosition({ ...point, accuracyM: result.fix.accuracyM ?? null });
         const accuracyM = result.fix.accuracyM;
         if (accuracyM != null) {
-          pendingAccuracyRef.current = Math.min(
-            pendingAccuracyRef.current ?? Number.POSITIVE_INFINITY,
-            accuracyM,
-          );
+          run.pendingAccuracyM = Math.min(run.pendingAccuracyM ?? Number.POSITIVE_INFINITY, accuracyM);
         }
         setPath((current) => [...current, point]);
         setLocalCellKeys((current) => {
@@ -255,9 +282,10 @@ export function useRunTracker({
           quality: gpsQuality(result.fix.accuracyM),
         }));
 
-        if (pendingRef.current.length >= REVEAL_FLUSH_POINTS) void flush();
+        if (run.pending.length >= REVEAL_FLUSH_POINTS) void flush(run);
       },
       (error) => {
+        if (runRef.current !== run) return;
         const denied = error.code === error.PERMISSION_DENIED;
         setStatus((s) => ({
           ...s,
@@ -275,15 +303,17 @@ export function useRunTracker({
       { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 },
     );
 
-    flushTimerRef.current = setInterval(() => void flush(), REVEAL_FLUSH_MS);
+    run.flushTimer = setInterval(() => void flush(run), REVEAL_FLUSH_MS);
   }, [ensureTrace, flush, revealRadiusM]);
 
   useEffect(
     () => () => {
-      if (watchIdRef.current != null && typeof navigator !== 'undefined') {
-        navigator.geolocation.clearWatch(watchIdRef.current);
+      const run = runRef.current;
+      if (!run) return;
+      if (run.watchId != null && typeof navigator !== 'undefined') {
+        navigator.geolocation.clearWatch(run.watchId);
       }
-      if (flushTimerRef.current) clearInterval(flushTimerRef.current);
+      if (run.flushTimer) clearInterval(run.flushTimer);
     },
     [],
   );
@@ -302,6 +332,8 @@ export function useRunTracker({
     status,
     position,
     path,
+    /** The active run's trace, once opened, so reports can be linked to it. */
+    traceId,
     localBounds,
     revealRadiusM,
     revealPending: reveal.isPending,

@@ -58,16 +58,37 @@ const SPELLED_NUMBERS: Record<string, number> = {
 
 const CM_UNITS = '(?:cm|centimetre|centimeter|centimetres|centimeters)';
 
+const NUMBER_WORDS = Object.keys(SPELLED_NUMBERS).join('|');
+
+/** "one hundred and twenty five" → 125. Filler words such as "and" are ignored. */
+function spelledNumber(words: readonly string[]): number | null {
+  let total = 0;
+  let group = 0;
+  let seen = false;
+
+  for (const word of words) {
+    const value = SPELLED_NUMBERS[word];
+    if (value == null) continue;
+    seen = true;
+    if (value === 100) {
+      total += Math.max(group, 1) * 100;
+      group = 0;
+    } else {
+      group += value;
+    }
+  }
+
+  return seen ? total + group : null;
+}
+
 function numberBefore(text: string, unitPattern: string): number | null {
   const digits = new RegExp(`(\\d{1,3})\\s*${unitPattern}`).exec(text);
   if (digits?.[1]) return Number(digits[1]);
 
-  const words = Object.keys(SPELLED_NUMBERS).join('|');
-  const spelled = new RegExp(`(${words})(?:\\s+(${words}))?\\s*${unitPattern}`).exec(text);
+  const term = `(?:${NUMBER_WORDS}|and)`;
+  const spelled = new RegExp(`((?:${term}\\s+){0,3}${term})\\s*${unitPattern}`).exec(text);
   if (!spelled?.[1]) return null;
-  const first = SPELLED_NUMBERS[spelled[1]] ?? 0;
-  const second = spelled[2] ? SPELLED_NUMBERS[spelled[2]] ?? 0 : 0;
-  return first + second;
+  return spelledNumber(spelled[1].split(/\s+/));
 }
 
 export interface ParsedVoiceReport {
