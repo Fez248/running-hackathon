@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Sidewalk Map">
+  <rect width="512" height="512" fill="#0f1115" />
+  <g fill="none" stroke="#262b35" stroke-width="10">
+    <path d="M256 44l76 44v88l-76 44-76-44V88z" />
+    <path d="M104 132l76 44v88l-76 44-76-44v-88z" />
+    <path d="M408 132l76 44v88l-76 44-76-44v-88z" />
+  </g>
+  <path d="M256 76l62 36v72l-62 36-62-36v-72z" fill="#171a21" stroke="#4ade80" stroke-width="14" />
+  <g transform="translate(28 0)">
+  <path
+    d="M96 372c0-18 12-30 30-30 22 0 40 12 60 24 16 10 30 14 48 14h62c34 0 58 16 58 38 0 12-10 20-26 20H120c-16 0-24-10-24-24z"
+    fill="#4ade80"
+  />
+  <path d="M126 342c14-30 32-50 56-64l26 36c-16 12-28 26-36 44z" fill="#fbbf24" />
+  <g stroke="#0f1115" stroke-width="12" stroke-linecap="round">
+    <path d="M172 322l24 24" />
+    <path d="M198 306l24 24" />
+    <path d="M224 294l24 24" />
+  </g>
+  <path d="M112 402h242" stroke="#0f1115" stroke-width="16" stroke-linecap="round" />
+  </g>
+  <path d="M56 452h400" stroke="#262b35" stroke-width="16" stroke-linecap="round" />
+</svg>
