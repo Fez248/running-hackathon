@@ -27,6 +27,31 @@ export function boundsAround(center: Coordinate, radiusM: number) {
   };
 }
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+/**
+ * Clamp a viewport into valid WGS84 ranges. Map libraries report unwrapped
+ * bounds — zoomed out, or panned across the antimeridian, the edges run past
+ * ±180 — which the bounds schemas reject.
+ */
+export function clampBounds(bounds: {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}) {
+  const west = clamp(bounds.minLng, -180, 180);
+  const east = clamp(bounds.maxLng, -180, 180);
+  const south = clamp(bounds.minLat, -90, 90);
+  const north = clamp(bounds.maxLat, -90, 90);
+  return {
+    minLat: Math.min(south, north),
+    maxLat: Math.max(south, north),
+    minLng: Math.min(west, east),
+    maxLng: Math.max(west, east),
+  };
+}
+
 /**
  * Snap a coordinate to a fixed grid so that reports captured at speed cluster
  * into the same sidewalk feature. ~1e-4 degrees is roughly 11 m.

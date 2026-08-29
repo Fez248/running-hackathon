@@ -205,6 +205,9 @@ export function useRunTracker({
       return;
     }
 
+    // A second start without a stop would orphan the previous watch and timer.
+    if (runRef.current) void stopRef.current();
+
     runIdRef.current += 1;
     const run: RunState = {
       id: runIdRef.current,

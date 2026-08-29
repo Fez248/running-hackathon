@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
+import { DomEvent, type Map as LeafletMap } from 'leaflet';
 import {
   CircleMarker,
   MapContainer,
@@ -12,6 +13,7 @@ import {
 } from 'react-leaflet';
 import {
   OBSTACLE_LABELS,
+  clampBounds,
   type Coordinate,
   type FogBounds,
   type ObstacleKind,
@@ -59,20 +61,45 @@ function MapEvents({
   onPick,
   onViewportChange,
 }: Pick<MapViewProps, 'onPick' | 'onViewportChange'>) {
+  const emit = useCallback(
+    (instance: LeafletMap) => {
+      const bounds = instance.getBounds();
+      onViewportChange(
+        clampBounds({
+          minLat: bounds.getSouth(),
+          maxLat: bounds.getNorth(),
+          minLng: bounds.getWest(),
+          maxLng: bounds.getEast(),
+        }),
+      );
+    },
+    [onViewportChange],
+  );
+
   const map = useMapEvents({
     click(event) {
-      onPick({ lat: event.latlng.lat, lng: event.latlng.lng });
+      // A tap after panning past the antimeridian must still be a longitude
+      // inside ±180.
+      const point = event.latlng.wrap();
+      onPick({ lat: Math.min(90, Math.max(-90, point.lat)), lng: point.lng });
     },
     moveend() {
-      const bounds = map.getBounds();
-      onViewportChange({
-        minLat: bounds.getSouth(),
-        maxLat: bounds.getNorth(),
-        minLng: bounds.getWest(),
-        maxLng: bounds.getEast(),
-      });
+      emit(map);
+    },
+    zoomend() {
+      emit(map);
+    },
+    resize() {
+      emit(map);
     },
   });
+
+  // The initial bounds depend on the rendered container size, so the first
+  // query has to use them instead of the placeholder viewport.
+  useEffect(() => {
+    emit(map);
+  }, [emit, map]);
+
   return null;
 }
 
@@ -138,6 +165,10 @@ export function MapView({
               fillColor: COLORS[report.effectivePassability],
               fillOpacity: 0.6,
               dashArray: report.source === 'VOICE' ? '3' : undefined,
+            }}
+            eventHandlers={{
+              // Opening a popup must not also move the report pin.
+              click: (event) => DomEvent.stopPropagation(event.originalEvent),
             }}
           >
             <Popup>

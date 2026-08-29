@@ -50,34 +50,36 @@ export const reportRouter = createTRPCRouter({
 
   /** One-tap capture while running/riding. Idempotent on clientReportId. */
   create: publicProcedure.input(createReportSchema).mutation(async ({ ctx, input }) => {
-    if (input.clientReportId) {
-      const existing = await ctx.prisma.report.findUnique({
-        where: { clientReportId: input.clientReportId },
-      });
-      if (existing) return existing;
-    }
+    const data = {
+      lat: input.lat,
+      lng: input.lng,
+      gridKey: gridKey({ lat: input.lat, lng: input.lng }),
+      kind: input.kind,
+      passability: input.passability,
+      heightCm: input.heightCm ?? null,
+      widthCm: input.widthCm ?? null,
+      note: input.note ?? null,
+      photoUrl: input.photoUrl ?? null,
+      accuracyM: input.accuracyM ?? null,
+      capturedByProfile: input.capturedByProfile ?? null,
+      source: input.source,
+      transcript: input.transcript ?? null,
+      traceId: input.traceId ?? null,
+      clientReportId: input.clientReportId ?? null,
+      authorId: ctx.user?.id ?? null,
+      confidence: confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }),
+    };
 
-    return ctx.prisma.report.create({
-      data: {
-        lat: input.lat,
-        lng: input.lng,
-        gridKey: gridKey({ lat: input.lat, lng: input.lng }),
-        kind: input.kind,
-        passability: input.passability,
-        heightCm: input.heightCm ?? null,
-        widthCm: input.widthCm ?? null,
-        note: input.note ?? null,
-        photoUrl: input.photoUrl ?? null,
-        accuracyM: input.accuracyM ?? null,
-        capturedByProfile: input.capturedByProfile ?? null,
-        source: input.source,
-        transcript: input.transcript ?? null,
-        traceId: input.traceId ?? null,
-        clientReportId: input.clientReportId ?? null,
-        authorId: ctx.user?.id ?? null,
-        confidence: confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }),
-      },
-    });
+    // Upsert rather than check-then-create: a retry racing the first attempt
+    // would otherwise hit the clientReportId unique constraint instead of
+    // deduplicating, which is what createMany already does.
+    return input.clientReportId
+      ? ctx.prisma.report.upsert({
+          where: { clientReportId: input.clientReportId },
+          update: {},
+          create: data,
+        })
+      : ctx.prisma.report.create({ data });
   }),
 
   /**
@@ -97,29 +99,35 @@ export const reportRouter = createTRPCRouter({
     const parsed = parseVoiceReport(input.transcript, input.recognitionConfidence);
     if (!parsed) return { report: null, parsed: null, ignored: true };
 
-    const report = await ctx.prisma.report.create({
-      data: {
-        lat: input.lat,
-        lng: input.lng,
-        gridKey: gridKey({ lat: input.lat, lng: input.lng }),
-        // Server parse wins: a stored voice report must match its transcript.
-        kind: parsed.kind,
-        passability: parsed.passability,
-        heightCm: parsed.heightCm ?? null,
-        widthCm: parsed.widthCm ?? null,
-        note: parsed.note,
-        accuracyM: input.accuracyM ?? null,
-        capturedByProfile: input.capturedByProfile ?? null,
-        source: 'VOICE',
-        transcript: input.transcript,
-        traceId: input.traceId ?? null,
-        clientReportId: input.clientReportId ?? null,
-        authorId: ctx.user?.id ?? null,
-        confidence:
-          confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }) *
-          parsed.parseConfidence,
-      },
-    });
+    const data = {
+      lat: input.lat,
+      lng: input.lng,
+      gridKey: gridKey({ lat: input.lat, lng: input.lng }),
+      // Server parse wins: a stored voice report must match its transcript.
+      kind: parsed.kind,
+      passability: parsed.passability,
+      heightCm: parsed.heightCm ?? null,
+      widthCm: parsed.widthCm ?? null,
+      note: parsed.note,
+      accuracyM: input.accuracyM ?? null,
+      capturedByProfile: input.capturedByProfile ?? null,
+      source: 'VOICE' as const,
+      transcript: input.transcript,
+      traceId: input.traceId ?? null,
+      clientReportId: input.clientReportId ?? null,
+      authorId: ctx.user?.id ?? null,
+      confidence:
+        confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }) *
+        parsed.parseConfidence,
+    };
+
+    const report = input.clientReportId
+      ? await ctx.prisma.report.upsert({
+          where: { clientReportId: input.clientReportId },
+          update: {},
+          create: data,
+        })
+      : await ctx.prisma.report.create({ data });
 
     return { report, parsed, ignored: false };
   }),

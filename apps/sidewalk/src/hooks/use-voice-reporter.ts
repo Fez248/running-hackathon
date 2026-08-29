@@ -109,6 +109,14 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
       return;
     }
 
+    // A second start without a stop would leave the previous recogniser
+    // restarting itself from its own onend handler.
+    if (recognitionRef.current) {
+      wantListeningRef.current = false;
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
+    }
+
     const recognition = new Ctor();
     recognition.lang = lang;
     recognition.continuous = true;

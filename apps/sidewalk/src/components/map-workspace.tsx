@@ -217,6 +217,7 @@ export function MapWorkspace() {
         />
 
         <div className="card">
+          <h2>Filters</h2>
           <label htmlFor="profile">I travel as</label>
           <select
             id="profile"
@@ -230,14 +231,17 @@ export function MapWorkspace() {
             ))}
           </select>
 
-          <label>Filter features</label>
-          <div className="chips">
+          <span className="field-label" id="kind-filter-label">
+            Filter features
+          </span>
+          <div className="chips" role="group" aria-labelledby="kind-filter-label">
             {OBSTACLE_KINDS.map((kind) => (
               <button
                 key={kind}
                 type="button"
                 className="chip"
                 data-active={kinds.includes(kind)}
+                aria-pressed={kinds.includes(kind)}
                 onClick={() => toggleKind(kind)}
               >
                 {OBSTACLE_LABELS[kind]}
@@ -254,10 +258,14 @@ export function MapWorkspace() {
         />
 
         <div className="card">
-          <strong>
+          <h2 aria-live="polite">
             {reports.isPending ? 'Loading reports…' : `${markers.length} reports in view`}
-          </strong>
-          {reports.error ? <p className="muted">{reports.error.message}</p> : null}
+          </h2>
+          {reports.error ? (
+            <p className="error" role="alert">
+              {reports.error.message}
+            </p>
+          ) : null}
           {markers.map((report) => (
             <div className="report" key={report.id}>
               <div>
