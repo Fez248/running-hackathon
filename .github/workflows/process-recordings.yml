@@ -34,17 +34,28 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
+          FIRST_PUSHED: ${{ github.event.commits[0].id }}
           INPUT_RECORDING: ${{ inputs.recording }}
         run: |
           set -euo pipefail
+          exists() { [ -n "${1:-}" ] && git cat-file -e "${1}^{commit}" 2>/dev/null; }
           if [ "$EVENT" = "push" ]; then
             # The whole pushed range, so a multi-commit push and a merge of a
             # branch that added recordings are both covered. A branch's first
-            # push has no usable `before` sha, so fall back to the tip commit
-            # against its first parent — which is also what makes a merge
-            # commit list the merged branch's files rather than nothing.
-            if [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-              git diff --name-only --diff-filter=AM "$BEFORE" "$GITHUB_SHA" > selected.txt
+            # push has no `before` to diff from, so start from the parent of the
+            # oldest commit the push carried instead; only if that is missing
+            # too does this fall back to the tip commit against its first parent
+            # (which is what makes a merge commit list the merged branch's files
+            # rather than the empty combined diff).
+            if exists "$BEFORE"; then
+              from="$BEFORE"
+            elif exists "${FIRST_PUSHED}^"; then
+              from="${FIRST_PUSHED}^"
+            else
+              from=""
+            fi
+            if [ -n "$from" ]; then
+              git diff --name-only --diff-filter=AM "$from" "$GITHUB_SHA" > selected.txt
             else
               git show --first-parent --pretty=format: --name-only --diff-filter=AM \
                 "$GITHUB_SHA" > selected.txt
