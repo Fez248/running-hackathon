@@ -15,6 +15,7 @@ import { useLocationPermission } from '@/hooks/use-location-permission';
 import { useRunTracker } from '@/hooks/use-run-tracker';
 import { useVoiceReporter } from '@/hooks/use-voice-reporter';
 import { LocationConsentPanel } from './location-consent-panel';
+import { MilestoneCelebration } from './milestone-celebration';
 import { ReportForm } from './report-form';
 import { RunPanel } from './run-panel';
 import { ScanPanel } from './scan-panel';
@@ -207,6 +208,8 @@ export function MapWorkspace() {
 
   return (
     <main className="layout">
+      <MilestoneCelebration utterances={voice.utterances} />
+
       <MapView
         center={DEFAULT_CENTER}
         reports={markers}
