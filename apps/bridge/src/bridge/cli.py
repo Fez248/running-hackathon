@@ -1,4 +1,4 @@
-"""CLI: ``python -m bridge.cli run|demo|plot``."""
+"""CLI: ``python -m bridge.cli run|demo|plot|scan``."""
 
 from __future__ import annotations
 
@@ -9,11 +9,16 @@ from pathlib import Path
 import numpy as np
 
 from .detect import detect_single_pass, score_pass
+from .evaluate import evaluate_detections
 from .experiments import ALL_EXPERIMENTS, ROUTE_ANOMALIES, run_all
+from .ingest import load_recording, write_export_dir
 from .pipeline import process_pass
+from .scan import format_report, scan_recording, write_output
 from .synth import SurfaceScenario, simulate_pass
 
-DEFAULT_OUT = Path(__file__).resolve().parents[2] / "docs" / "results"
+APP_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_OUT = APP_ROOT / "docs" / "results"
+DEFAULT_SAMPLE_DIR = APP_ROOT / "samples" / "demo_pass"
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -41,6 +46,48 @@ def cmd_demo(args: argparse.Namespace) -> int:
         )
     print(f"max |score| = {np.max(np.abs(sc.signed)):.2f}")
     return 0
+
+
+def positive_float(text: str) -> float:
+    value = float(text)
+    if not np.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"expected a finite positive number, got {text!r}")
+    return value
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Scan a real (or, with --demo, a simulated) recording for floor imperfections."""
+    truth = None
+    if args.demo:
+        sample_dir = Path(args.sample_dir) if args.sample_dir else DEFAULT_SAMPLE_DIR
+        scn = SurfaceScenario(seed=args.seed, anomalies=list(ROUTE_ANOMALIES), fs=args.demo_fs)
+        trace, gps, truth = simulate_pass(scn)
+        write_export_dir(sample_dir, trace, gps)
+        print(f"demo: wrote a Sensor Logger shaped export to {sample_dir}")
+        rec = load_recording(sample_dir)
+    else:
+        if not args.recording:
+            print("error: pass a recording path, or --demo to generate one")
+            return 2
+        rec = load_recording(Path(args.recording), Path(args.gps) if args.gps else None)
+
+    result, _pp = scan_recording(rec, threshold=args.threshold)
+    print(format_report(result))
+
+    if truth is not None and result.quality.usable:
+        dets = detect_single_pass(_pp, threshold=args.threshold)
+        ev = evaluate_detections(dets, truth)
+        print("ground truth:", [(a.kind, a.start_m, a.end_m) for a in truth])
+        loc = "n/a" if ev.mean_localization_error_m is None else f"{ev.mean_localization_error_m:.1f} m"
+        print(
+            f"vs truth      precision {ev.precision:.2f}  recall {ev.recall:.2f}  "
+            f"F1 {ev.f1:.2f}  loc err {loc}"
+        )
+
+    if args.out:
+        path = write_output(result, Path(args.out), args.format)
+        print(f"wrote {path}")
+    return 0 if result.quality.usable else 1
 
 
 def cmd_plot(args: argparse.Namespace) -> int:
@@ -93,6 +140,20 @@ def main(argv: list[str] | None = None) -> int:
     pd_ = sub.add_parser("demo", help="simulate one pass and print detections")
     pd_.add_argument("--seed", type=int, default=1)
     pd_.set_defaults(func=cmd_demo)
+
+    ps = sub.add_parser("scan", help="scan a recorded pass for floor imperfections")
+    ps.add_argument("recording", nargs="?", help="export dir, .zip, or accelerometer CSV")
+    ps.add_argument("--gps", default=None, help="GPS CSV (t,lat,lon[,accuracy_m]) for a bare accel CSV")
+    ps.add_argument("--demo", action="store_true", help="generate and scan a simulated recording")
+    ps.add_argument("--demo-fs", type=positive_float, default=200.0, help="demo IMU sample rate (Hz)")
+    ps.add_argument("--sample-dir", default=None, help="where --demo writes the generated export")
+    ps.add_argument(
+        "--threshold", type=positive_float, default=3.0, help="robust-z detection threshold"
+    )
+    ps.add_argument("--format", choices=["json", "geojson", "csv"], default="json")
+    ps.add_argument("--out", default=None, help="write findings to this file")
+    ps.add_argument("--seed", type=int, default=1)
+    ps.set_defaults(func=cmd_scan)
 
     pp_ = sub.add_parser("plot", help="render diagnostic figure")
     pp_.add_argument("--seed", type=int, default=1)

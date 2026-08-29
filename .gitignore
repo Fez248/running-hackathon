@@ -34,3 +34,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+# generated demo recordings (apps/bridge scan --demo)
+apps/bridge/samples/

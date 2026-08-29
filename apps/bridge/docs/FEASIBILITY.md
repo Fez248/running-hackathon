@@ -158,7 +158,11 @@ app that delivers ≥100 Hz IMU with trustworthy timestamps plus GPS. Constraint
 platform comparison and a recommended architecture:
 [SENSOR_RECORDING_STACK.md](SENSOR_RECORDING_STACK.md).
 
-**Phase 1 — calibration walk.** One known route with one deliberately planted,
+**Phase 1 — calibration walk.** The analysis side of this phase is built:
+`bridge scan` ingests a Sensor Logger / phyphox / CSV recording, gates it on the
+requirements below and reports geo-located findings — see
+[FLOOR_IMPERFECTION_MVP.md](FLOOR_IMPERFECTION_MVP.md). What is left is the walk:
+one known route with one deliberately planted,
 movable anomaly (a loose board / a doormat). 6+ passes, 2 carry positions, ground
 truth marked by GPS waypoint *and* video. This is the minimum experiment that can
 falsify the whole idea, and it costs one afternoon.

@@ -57,6 +57,18 @@ def distance_at_times(track: GpsTrack, t: np.ndarray, smooth_s: float = 5.0) -> 
     return np.interp(np.asarray(t, dtype=float), track.t, d)
 
 
+def position_at_distance(track: GpsTrack, distance_m, smooth_s: float = 5.0):
+    """Inverse of :func:`cumulative_distance`: along-path metres -> (lat, lon).
+
+    Used to put a detection, which the detector expresses in metres along the
+    route, back onto the map.
+    """
+    smoothed = smooth_track(track, smooth_s) if smooth_s > 0 else track
+    d = cumulative_distance(track, smooth_s=smooth_s)
+    q = np.asarray(distance_m, dtype=float)
+    return np.interp(q, d, smoothed.lat), np.interp(q, d, smoothed.lon)
+
+
 def bin_index(distance_m: np.ndarray, bin_size_m: float) -> np.ndarray:
     return np.floor(np.asarray(distance_m, dtype=float) / bin_size_m).astype(int)
 

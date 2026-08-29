@@ -15,6 +15,8 @@ steps.
 | `libs/core` | `@sidewalk/core` | Domain enums, zod schemas, geo + passability/confidence logic |
 | `libs/db` | `@sidewalk/db` | Prisma schema (SQLite), client singleton, seed |
 | `libs/api` | `@sidewalk/api` | tRPC context and routers |
+| `apps/bridge` | `bridge` (Python) | Feet-as-a-sensor-network prototype: phone IMU + GPS → floor imperfections |
+| `libs/imukit` | `imukit` (Python) | Shared IMU/GPS primitives used by `apps/bridge` |
 
 Libraries are shipped as TypeScript source and compiled by the consuming app
 (`transpilePackages`), so a second app in `apps/` reuses them by adding a workspace dependency.
@@ -34,6 +36,23 @@ Configuration lives in one place: the repository-root `.env`. Prisma commands lo
 `dotenv-cli` and Next loads it in `apps/sidewalk/next.config.mjs`, so `DATABASE_URL` resolves
 identically from the root, `libs/db` and `apps/sidewalk`. `file:./dev.db` is relative to
 `libs/db/prisma/schema.prisma`, i.e. `libs/db/prisma/dev.db`.
+
+## Detecting floor imperfections from a phone recording
+
+`apps/bridge` turns an ordinary phone IMU + GPS recording into geo-located surface
+findings (loose slabs, mats, wet patches, loose boards) that feed the Sidewalk Map as
+`ROUGH_SURFACE` points.
+
+```bash
+cd apps/bridge
+pip install -e ../../libs/imukit -e '.[dev]'
+python -m bridge.cli scan --demo                 # no hardware needed
+python -m bridge.cli scan ~/Downloads/run.zip --out found.geojson --format geojson
+```
+
+Recording a real pass — logging apps, the ≥100 Hz / ≤3 m GPS / gravity-included
+acceptance checks, and how to read the output — is in
+[apps/bridge/docs/REAL_WORLD_TEST.md](./apps/bridge/docs/REAL_WORLD_TEST.md).
 
 ## Turso / deployment
 
