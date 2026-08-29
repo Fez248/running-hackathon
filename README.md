@@ -39,7 +39,14 @@ whatever directory they start in. `file:./dev.db` is relative to `libs/db/prisma
 i.e. `libs/db/prisma/dev.db`.
 
 The seed appends, so re-seeding a populated database duplicates rows — use `npm run db:reset`
-(force-reset the schema, then seed) to get back to the 8-report fixture.
+(force-reset the schema, then seed) to get back to the 8-report fixture. Run it after pulling schema
+changes too, since `dev.db` is created with `db push` rather than migrations.
+
+Prisma commands print `Your schema specifies the following datasource properties but you are using a
+Driver Adapter [...] The values from your schema will NOT be used!`. That is informational: the
+schema's `url` is a placeholder Prisma requires for validation, and the effective database is the one
+`DATABASE_URL` names. `prisma migrate` is the exception — its schema engine cannot use the libSQL
+adapter, so migrations always run against the schema's `libs/db/prisma/dev.db`.
 
 ## Detecting floor imperfections from a phone recording
 
