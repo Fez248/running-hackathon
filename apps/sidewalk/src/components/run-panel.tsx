@@ -132,11 +132,12 @@ export function RunPanel({
       >
         <input
           aria-label="Dictate or type a report"
-          placeholder="e.g. high curb about 15 cm"
+          placeholder={status.active ? 'e.g. high curb about 15 cm' : 'Start a run to log a report here'}
           value={typed}
+          disabled={!status.active}
           onChange={(event) => setTyped(event.target.value)}
         />
-        <button type="submit" disabled={!typed.trim()}>
+        <button type="submit" disabled={!status.active || !typed.trim()}>
           Log
         </button>
       </form>

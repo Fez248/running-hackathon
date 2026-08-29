@@ -81,14 +81,57 @@ function spelledNumber(words: readonly string[]): number | null {
   return seen ? total + group : null;
 }
 
-function numberBefore(text: string, unitPattern: string): number | null {
-  const digits = new RegExp(`(\\d{1,3})\\s*${unitPattern}`).exec(text);
-  if (digits?.[1]) return Number(digits[1]);
+const HEIGHT_WORDS = /high|tall|height|deep|depth|step/g;
+const WIDTH_WORDS = /wide|width|narrow/g;
 
-  const term = `(?:${NUMBER_WORDS}|and)`;
-  const spelled = new RegExp(`((?:${term}\\s+){0,3}${term})\\s*${unitPattern}`).exec(text);
-  if (!spelled?.[1]) return null;
-  return spelledNumber(spelled[1].split(/\s+/));
+/** Character distance from a span to the closest qualifier of that dimension. */
+function qualifierDistance(text: string, words: RegExp, start: number, end: number): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (const match of text.matchAll(words)) {
+    if (match.index == null) continue;
+    const distance =
+      match.index > end ? match.index - end : Math.max(0, start - (match.index + match[0].length));
+    best = Math.min(best, distance);
+  }
+  return best;
+}
+
+interface Measurement {
+  value: number;
+  /** Which dimension the surrounding words attribute it to. */
+  dimension: 'height' | 'width' | null;
+}
+
+/**
+ * Every centimetre measurement in the utterance, attributed to a dimension by
+ * the words around it, so "fifteen centimetre curb on a one metre wide path"
+ * does not record the curb height as the path width.
+ */
+function measurements(text: string): Measurement[] {
+  const term = `(?:\\d{1,3}|${NUMBER_WORDS}|and)`;
+  const pattern = new RegExp(`((?:${term}\\s+){0,3}${term})\\s*${CM_UNITS}`, 'g');
+  const found: Measurement[] = [];
+
+  for (const match of text.matchAll(pattern)) {
+    const raw = match[1]?.trim();
+    if (!raw || match.index == null) continue;
+    const digits = /(\d{1,3})\s*$/.exec(raw);
+    const value = digits?.[1] ? Number(digits[1]) : spelledNumber(raw.split(/\s+/));
+    if (value == null) continue;
+
+    // Attributed to whichever qualifier sits closest, within a few words.
+    const start = match.index;
+    const end = match.index + match[0].length;
+    const height = qualifierDistance(text, HEIGHT_WORDS, start, end);
+    const width = qualifierDistance(text, WIDTH_WORDS, start, end);
+    const nearest = Math.min(height, width);
+    found.push({
+      value,
+      dimension: nearest > 24 || height === width ? null : height < width ? 'height' : 'width',
+    });
+  }
+
+  return found;
 }
 
 export interface ParsedVoiceReport {
@@ -148,8 +191,12 @@ export function parseVoiceReport(
     }
   }
 
-  const heightCm = numberBefore(text, CM_UNITS);
-  const widthCm = /wide|width/.test(text) ? numberBefore(text, CM_UNITS) : null;
+  const sizes = measurements(text);
+  const widthCm = sizes.find((size) => size.dimension === 'width')?.value ?? null;
+  // An unqualified measurement is read as a height: "a curb about 15 cm".
+  const heightCm =
+    sizes.find((size) => size.dimension === 'height')?.value ??
+    (widthCm == null ? sizes.find((size) => size.dimension === null)?.value ?? null : null);
 
   const keywordStrength = 0.6 + (explicitPassability ? 0.2 : 0) + (heightCm != null ? 0.1 : 0);
   const parseConfidence = Math.max(
@@ -160,7 +207,7 @@ export function parseVoiceReport(
   return {
     kind: match.rule.kind,
     passability,
-    ...(heightCm != null && widthCm == null ? { heightCm } : {}),
+    ...(heightCm != null ? { heightCm } : {}),
     ...(widthCm != null ? { widthCm } : {}),
     note: note.slice(0, 280),
     matchedPhrase: match.phrase,

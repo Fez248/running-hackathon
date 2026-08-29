@@ -94,6 +94,8 @@ export function MapWorkspace() {
   positionRef.current = runTracker.position;
   const traceIdRef = useRef(runTracker.traceId);
   traceIdRef.current = runTracker.traceId;
+  const runningRef = useRef(running);
+  runningRef.current = running;
 
   const createFromVoice = api.report.createFromVoice.useMutation({
     onSuccess: (result) => {
@@ -113,9 +115,11 @@ export function MapWorkspace() {
 
   const voice = useVoiceReporter({
     onReport: (utterance) => {
-      const position = positionRef.current;
+      const position = runningRef.current ? positionRef.current : null;
       if (!position) {
-        setVoiceStatus('Heard a report but there is no GPS fix yet — start a run first.');
+        // Refusing a stale fix: after a run ends the last position is history, not
+        // where the reporter is standing.
+        setVoiceStatus('Heard a report but there is no live GPS fix — start a run first.');
         return;
       }
       createFromVoiceRef.current.mutate({

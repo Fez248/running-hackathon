@@ -27,6 +27,17 @@ describe('parseVoiceReport', () => {
     expect(parseVoiceReport('curb one hundred and twenty five centimetres')?.heightCm).toBe(125);
   });
 
+  it('keeps height and width apart when both are dictated', () => {
+    expect(parseVoiceReport('high curb fifteen centimetres, path eighty centimetres wide')).toMatchObject({
+      heightCm: 15,
+      widthCm: 80,
+    });
+    expect(parseVoiceReport('narrow path sixty centimetres wide next to a 20 cm high curb')).toMatchObject({
+      heightCm: 20,
+      widthCm: 60,
+    });
+  });
+
   it('prefers the longest matching phrase', () => {
     expect(parseVoiceReport('nice dropped kerb here')).toMatchObject({
       kind: 'CROSSING',

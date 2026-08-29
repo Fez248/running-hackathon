@@ -308,12 +308,9 @@ export function useRunTracker({
 
   useEffect(
     () => () => {
-      const run = runRef.current;
-      if (!run) return;
-      if (run.watchId != null && typeof navigator !== 'undefined') {
-        navigator.geolocation.clearWatch(run.watchId);
-      }
-      if (run.flushTimer) clearInterval(run.flushTimer);
+      // Best effort: React cleanup cannot await, so the final flush and trace
+      // close race the teardown. Coverage already persisted is unaffected.
+      if (runRef.current) void stopRef.current();
     },
     [],
   );

@@ -86,6 +86,18 @@ Privacy and support notes, surfaced in the UI as well:
   missing — or the microphone is denied — the panel falls back to a text field that runs the same
   parser.
 
+### Known limitations
+
+- Reports need a live run: typed and dictated reports are refused unless a run is active and has an
+  accepted fix, so a marker can never land on the previous run's last position.
+- Closing the tab mid-run is best effort. Leaving the map stops the run and tries to flush the last
+  fixes and close the trace, but a browser can discard in-flight requests on unload; fog already
+  confirmed by `coverage.reveal` survives, at worst the final few seconds of a path do not.
+- `coverage.reveal`, `trace.start` and `trace.finish` are public procedures with no ownership check,
+  matching the scaffold's anonymous reporting model — they would need auth before a public deploy.
+- `coverage.summary` derives explored area from the mean latitude of all cells rather than summing
+  per-cell areas.
+
 ### Platform findings
 
 - [MDN — `Geolocation.watchPosition()`](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation/watchPosition)
