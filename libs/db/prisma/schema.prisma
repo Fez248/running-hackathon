@@ -165,6 +165,8 @@ model SensorLoggerUpload {
   /// Claim count, so a recording that keeps failing stops being retried.
   attempts Int    @default(0)
 
+  /// Minted per claim; a completion must present the current token.
+  leaseToken  String?
   claimedAt   DateTime?
   completedAt DateTime?
   /// Redacted failure reason from the worker; never contains the secret code.

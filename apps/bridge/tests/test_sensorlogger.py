@@ -220,7 +220,7 @@ def test_feedback_markdown_reports_findings_and_refuses_to_conclude_on_bad_captu
 def test_sync_once_downloads_scans_and_reports_without_leaking_credentials(tmp_path):
     http = FakeHttp(
         recording=_recording_zip(tmp_path),
-        uploads=[{"studyId": "s1", "uploadId": "u1"}],
+        uploads=[{"studyId": "s1", "uploadId": "u1", "leaseToken": "lease-u1"}],
     )
 
     outcomes = sync_once(_config(send_feedback=True), opener=http)
@@ -232,6 +232,7 @@ def test_sync_once_downloads_scans_and_reports_without_leaking_credentials(tmp_p
 
     completion = http.posted("/jobs/complete")[0]
     assert completion["studyId"] == "s1" and completion["uploadId"] == "u1"
+    assert completion["leaseToken"] == "lease-u1"
     assert completion["bytes"] == outcome["bytes"]
     assert "secretCode" not in completion
     assert isinstance(completion["scan"], dict)
@@ -245,7 +246,7 @@ def test_sync_once_downloads_scans_and_reports_without_leaking_credentials(tmp_p
 
 
 def test_a_failed_download_is_reported_as_a_redacted_failure(tmp_path):
-    http = FakeHttp(uploads=[{"studyId": "s1", "uploadId": "u1"}])
+    http = FakeHttp(uploads=[{"studyId": "s1", "uploadId": "u1", "leaseToken": "lease-u1"}])
     http.download_error = urllib.error.URLError(f"refused ({SECRET})")
 
     outcomes = sync_once(_config(), opener=http)
@@ -257,7 +258,10 @@ def test_a_failed_download_is_reported_as_a_redacted_failure(tmp_path):
 
 
 def test_a_corrupt_recording_fails_the_upload_rather_than_the_worker(tmp_path):
-    http = FakeHttp(recording=b"not a zip", uploads=[{"studyId": "s1", "uploadId": "u1"}])
+    http = FakeHttp(
+        recording=b"not a zip",
+        uploads=[{"studyId": "s1", "uploadId": "u1", "leaseToken": "lease-u1"}],
+    )
 
     outcomes = sync_once(_config(), opener=http)
 
@@ -266,7 +270,14 @@ def test_a_corrupt_recording_fails_the_upload_rather_than_the_worker(tmp_path):
 
 
 def test_malformed_uploads_in_a_claim_are_skipped(tmp_path):
-    http = FakeHttp(uploads=[{"studyId": "s1"}, {"uploadId": "u2"}, "nope"])  # type: ignore[list-item]
+    http = FakeHttp(
+        uploads=[
+            {"studyId": "s1", "leaseToken": "lease"},
+            {"uploadId": "u2", "leaseToken": "lease"},
+            {"studyId": "s1", "uploadId": "u1"},
+            "nope",  # type: ignore[list-item]
+        ]
+    )
     assert sync_once(_config(), opener=http) == []
 
 
@@ -274,7 +285,7 @@ def test_client_sends_the_worker_bearer_token_and_caps_error_length():
     http = FakeHttp()
     client = SidewalkClient(_config(), opener=http)
 
-    client.complete("s1", "u1", error=f"{SECRET} " + "x" * 5000)
+    client.complete("s1", "u1", "lease-u1", error=f"{SECRET} " + "x" * 5000)
 
     _method, url, headers, body = http.requests[-1]
     assert url == "https://sidewalk.example/api/integrations/sensor-logger/jobs/complete"
@@ -384,7 +395,10 @@ def test_a_completion_outage_does_not_abandon_the_rest_of_the_batch(tmp_path):
     # One upload scans, one fails to download: both completion paths hit the outage.
     http = NoCompletions(
         recording=_recording_zip(tmp_path),
-        uploads=[{"studyId": "s1", "uploadId": "u1"}, {"studyId": "s1", "uploadId": "u2"}],
+        uploads=[
+            {"studyId": "s1", "uploadId": "u1", "leaseToken": "lease-u1"},
+            {"studyId": "s1", "uploadId": "u2", "leaseToken": "lease-u2"},
+        ],
     )
     scanned = sync_once(_config(), opener=http)
 
@@ -409,7 +423,9 @@ def test_feedback_failure_does_not_undo_a_recorded_scan(tmp_path):
 
     http = NoFeedback(recording=_recording_zip(tmp_path))
     config = _config(send_feedback=True)
-    outcome = process_upload("s1", "u1", config, SidewalkClient(config, opener=http), opener=http)
+    outcome = process_upload(
+        "s1", "u1", "lease-u1", config, SidewalkClient(config, opener=http), opener=http
+    )
 
     assert outcome["status"] == "done"
     assert "HTTP 500" in str(outcome["feedbackError"])

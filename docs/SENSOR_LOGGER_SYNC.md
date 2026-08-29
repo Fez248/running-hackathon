@@ -32,11 +32,11 @@ upload finished
                                    SensorLoggerUpload = PENDING
                                    200 {status: queued|duplicate}
                                                                    ◀─────── POST /jobs/claim  (bearer)
-                                   lease N rows → CLAIMED           ──────▶ {uploads:[{studyId,uploadId}]}
+                                   lease N rows → CLAIMED           ──────▶ {uploads:[{studyId,uploadId,leaseToken}]}
 GET /api/study/file/v1   ◀──────────────────────────────────────────────── download zip (Authorization: secret)
   (zip)                  ─────────────────────────────────────────────────▶ ingest → quality → scan
                                                                    ◀─────── POST /jobs/complete (bearer)
-                                   scanToReports() → Report rows            {studyId,uploadId,bytes,scan|error}
+                                   scanToReports() → Report rows            {studyId,uploadId,leaseToken,bytes,scan|error}
                                    upload = DONE | FAILED
 POST /api/study/webhook/v1 ◀─────────────────────────────────────────────── optional Markdown feedback
 ```
@@ -93,12 +93,13 @@ Worker-only. Auth: `Authorization: Bearer $SENSOR_LOGGER_WORKER_TOKEN` (a token 
 Study secret — the worker must never present a Sensor Logger credential to this app).
 
 Request `{"limit": 5}` (1–25, default 5; empty body allowed). Response
-`200 {"uploads":[{"studyId":"st_123","uploadId":"up_456","attempts":1}]}`.
+`200 {"uploads":[{"studyId":"st_123","uploadId":"up_456","attempts":1,"leaseToken":"…"}]}`.
 
 Leases are exclusive: rows move `PENDING → CLAIMED` under an optimistic `updatedAt` check, so two
-workers never get the same upload. A lease older than `SENSOR_LOGGER_CLAIM_TIMEOUT_MS` (default
-15 min) is reclaimed — a worker that dies mid-download does not strand the recording — and an upload
-that fails `SENSOR_LOGGER_MAX_ATTEMPTS` times (default 5) stops being handed out.
+workers never get the same upload. Each claim mints a fresh `leaseToken`, which the worker must echo
+back when completing — that is what makes a superseded holder's completion detectable. A lease older
+than `SENSOR_LOGGER_CLAIM_TIMEOUT_MS` (default 15 min) is reclaimed — a worker that dies mid-download
+does not strand the recording — and an upload that fails `SENSOR_LOGGER_MAX_ATTEMPTS` times (default 5) stops being handed out.
 
 ### `POST /api/integrations/sensor-logger/jobs/complete`
 
@@ -108,6 +109,7 @@ Worker-only, same bearer token. Body carries either a scan result or a redacted 
 {
   "studyId": "st_123",
   "uploadId": "up_456",
+  "leaseToken": "3f1c…",
   "bytes": 8123456,
   "scan": {
     "format": "sensorlogger",
@@ -132,12 +134,15 @@ Worker-only, same bearer token. Body carries either a scan result or a redacted 
 
 Responses: `200 {"status":"done","findingCount":1,"reportCount":1,"quality":"ok"}`,
 `200 {"status":"failed"}` for the error form, `400 invalid-json|invalid-payload`,
-`401 unauthorized`, `404 {"error":"unknown-upload"}`, `413 payload-too-large` (over 512 KiB),
+`401 unauthorized`, `409 {"error":"lease-not-held"}`, `413 payload-too-large` (over 512 KiB),
 `503 integration-not-configured`.
 
-A completion is matched against the upload queue *before* anything is written, so a scan for an
-upload the webhook never queued is refused without touching the map. When the worker cannot reach
-this endpoint it emits `{"status":"unreported","reportError":...}` for that upload and carries on
+The lease is verified *before* anything is written, and the closing update is scoped to
+`status = 'CLAIMED'` plus the presented `leaseToken`. So a scan for an upload the webhook never
+queued, for one nobody claimed, or from a worker whose lease already timed out and was handed to
+someone else is refused with `409` without touching the map or the other worker's row.
+
+When the worker cannot reach this endpoint it emits `{"status":"unreported","reportError":...}` for that upload and carries on
 with the rest of the batch; the lease then expires and the upload is handed out again.
 
 ## Data mapping
@@ -290,7 +295,7 @@ curl -sS -X POST http://localhost:3000/api/integrations/sensor-logger/jobs/claim
 curl -sS -X POST http://localhost:3000/api/integrations/sensor-logger/jobs/complete \
   -H 'authorization: Bearer dev-worker-token' \
   -H 'content-type: application/json' \
-  -d '{"studyId":"st_dev","uploadId":"up_1","bytes":1024,
+  -d '{"studyId":"st_dev","uploadId":"up_1","leaseToken":"<from step 3>","bytes":1024,
        "scan":{"format":"sensorlogger",
                "quality":{"verdict":"ok","usable":true,"reasons":[]},
                "cadence_spm":150,"n_windows":10,"n_footfalls":20,

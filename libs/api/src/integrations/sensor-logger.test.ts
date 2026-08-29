@@ -44,6 +44,7 @@ interface Row {
   status: 'PENDING' | 'CLAIMED' | 'DONE' | 'FAILED';
   attempts: number;
   claimedAt: Date | null;
+  leaseToken: string | null;
   completion?: CompletionRecord;
 }
 
@@ -57,7 +58,7 @@ function fakeStore(): SensorLoggerUploadStore & { rows: Row[] } {
         (row) => row.studyId === upload.studyId && row.uploadId === upload.uploadId,
       );
       if (existing) return { created: false, status: existing.status };
-      rows.push({ ...upload, status: 'PENDING', attempts: 0, claimedAt: null });
+      rows.push({ ...upload, status: 'PENDING', attempts: 0, claimedAt: null, leaseToken: null });
       return { created: true, status: 'PENDING' };
     },
     async claim({ limit, staleBefore, maxAttempts }) {
@@ -72,18 +73,32 @@ function fakeStore(): SensorLoggerUploadStore & { rows: Row[] } {
         row.status = 'CLAIMED';
         row.attempts += 1;
         row.claimedAt = new Date();
-        leased.push({ studyId: row.studyId, uploadId: row.uploadId, attempts: row.attempts });
+        row.leaseToken = `lease-${row.uploadId}-${row.attempts}`;
+        leased.push({
+          studyId: row.studyId,
+          uploadId: row.uploadId,
+          attempts: row.attempts,
+          leaseToken: row.leaseToken,
+        });
       }
       return leased;
     },
-    async isKnown(upload) {
+    async hasActiveLease({ studyId, uploadId, leaseToken }) {
       return rows.some(
-        (row) => row.studyId === upload.studyId && row.uploadId === upload.uploadId,
+        (row) =>
+          row.studyId === studyId &&
+          row.uploadId === uploadId &&
+          row.status === 'CLAIMED' &&
+          row.leaseToken === leaseToken,
       );
     },
     async complete(record) {
       const row = rows.find(
-        (candidate) => candidate.studyId === record.studyId && candidate.uploadId === record.uploadId,
+        (candidate) =>
+          candidate.studyId === record.studyId &&
+          candidate.uploadId === record.uploadId &&
+          candidate.status === 'CLAIMED' &&
+          candidate.leaseToken === record.leaseToken,
       );
       if (!row) return false;
       row.status = record.status;
@@ -156,6 +171,10 @@ describe('sensorLoggerConfigFromEnv', () => {
       claimTimeoutMs: 5000,
       maxAttempts: 5,
     });
+  });
+
+  it('falls back rather than rounding a fractional limit down to zero', () => {
+    expect(sensorLoggerConfigFromEnv({ SENSOR_LOGGER_MAX_ATTEMPTS: '0.5' }).maxAttempts).toBe(5);
   });
 });
 
@@ -237,12 +256,19 @@ describe('POST jobs/claim', () => {
   it('leases at most `limit` uploads and does not hand them out twice', async () => {
     const first = await handleSensorLoggerClaim(workerRequest('claim', { limit: 1 }), deps());
     expect(await first.json()).toEqual({
-      uploads: [{ studyId: 'study-1', uploadId: 'upload-1', attempts: 1 }],
+      uploads: [
+        {
+          studyId: 'study-1',
+          uploadId: 'upload-1',
+          attempts: 1,
+          leaseToken: 'lease-upload-1-1',
+        },
+      ],
     });
 
     const second = await handleSensorLoggerClaim(workerRequest('claim', { limit: 5 }), deps());
     expect((await second.json()).uploads).toEqual([
-      { studyId: 'study-1', uploadId: 'upload-2', attempts: 1 },
+      { studyId: 'study-1', uploadId: 'upload-2', attempts: 1, leaseToken: 'lease-upload-2-1' },
     ]);
   });
 
@@ -254,13 +280,27 @@ describe('POST jobs/claim', () => {
 });
 
 describe('POST jobs/complete', () => {
+  let leaseToken: string;
+
   beforeEach(async () => {
     await store.enqueue({ studyId: 'study-1', uploadId: 'upload-1' });
+    const [lease] = await store.claim({
+      limit: 1,
+      staleBefore: new Date(0),
+      maxAttempts: 3,
+    });
+    leaseToken = lease!.leaseToken;
   });
 
   it('turns a scan into reports and closes the upload', async () => {
     const response = await handleSensorLoggerCompletion(
-      workerRequest('complete', { studyId: 'study-1', uploadId: 'upload-1', bytes: 245407, scan }),
+      workerRequest('complete', {
+        studyId: 'study-1',
+        uploadId: 'upload-1',
+        leaseToken,
+        bytes: 245407,
+        scan,
+      }),
       deps(),
     );
     expect(response.status).toBe(200);
@@ -283,6 +323,7 @@ describe('POST jobs/complete', () => {
       workerRequest('complete', {
         studyId: 'study-1',
         uploadId: 'upload-1',
+        leaseToken,
         scan: {
           ...scan,
           quality: { verdict: 'unusable', usable: false, reasons: ['median GPS accuracy 9 m'] },
@@ -299,6 +340,7 @@ describe('POST jobs/complete', () => {
       workerRequest('complete', {
         studyId: 'study-1',
         uploadId: 'upload-1',
+        leaseToken,
         error: 'download failed: HTTP 403',
       }),
       deps(),
@@ -310,19 +352,38 @@ describe('POST jobs/complete', () => {
 
   it('rejects a completion for an upload the server never received', async () => {
     const response = await handleSensorLoggerCompletion(
-      workerRequest('complete', { studyId: 'study-1', uploadId: 'ghost', scan }),
+      workerRequest('complete', { studyId: 'study-1', uploadId: 'ghost', leaseToken, scan }),
       deps(),
     );
-    expect(response.status).toBe(404);
-    // The map must be untouched: an unknown completion is refused before mapping.
+    expect(response.status).toBe(409);
+    // The map must be untouched: an unheld completion is refused before mapping.
     expect(created).toEqual([]);
+  });
+
+  it('rejects a completion from a worker whose lease was reclaimed', async () => {
+    // The lease timed out and the upload went to another worker: the first
+    // worker's scan must not overwrite the second worker's row.
+    const [reclaimed] = await store.claim({
+      limit: 1,
+      staleBefore: new Date(Date.now() + 60_000),
+      maxAttempts: 3,
+    });
+    expect(reclaimed!.leaseToken).not.toBe(leaseToken);
+
+    const response = await handleSensorLoggerCompletion(
+      workerRequest('complete', { studyId: 'study-1', uploadId: 'upload-1', leaseToken, scan }),
+      deps(),
+    );
+    expect(response.status).toBe(409);
+    expect(created).toEqual([]);
+    expect(store.rows[0]?.status).toBe('CLAIMED');
   });
 
   it('rejects a completion that is neither a scan nor an error, and a bogus scan', async () => {
     expect(
       (
         await handleSensorLoggerCompletion(
-          workerRequest('complete', { studyId: 'study-1', uploadId: 'upload-1' }),
+          workerRequest('complete', { studyId: 'study-1', uploadId: 'upload-1', leaseToken }),
           deps(),
         )
       ).status,
@@ -333,6 +394,7 @@ describe('POST jobs/complete', () => {
           workerRequest('complete', {
             studyId: 'study-1',
             uploadId: 'upload-1',
+            leaseToken,
             scan: { ...scan, findings: [{ ...scan.findings[0], lat: 999 }] },
           }),
           deps(),
@@ -345,7 +407,11 @@ describe('POST jobs/complete', () => {
     expect(
       (
         await handleSensorLoggerCompletion(
-          workerRequest('complete', { studyId: 'study-1', uploadId: 'upload-1', scan }, null),
+          workerRequest(
+            'complete',
+            { studyId: 'study-1', uploadId: 'upload-1', leaseToken, scan },
+            null,
+          ),
           deps(),
         )
       ).status,

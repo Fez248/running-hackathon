@@ -8,6 +8,7 @@
  * `./sensor-logger` keeps a real queue a drop-in replacement.
  */
 
+import { randomUUID } from 'node:crypto';
 import { confidence, gridKey, type CreateReportInput } from '@sidewalk/core';
 import { prisma } from '@sidewalk/db';
 import {
@@ -61,33 +62,48 @@ export function prismaSensorLoggerStore(client: PrismaClientLike = prisma): Sens
       const claimed: ClaimedUpload[] = [];
       for (const candidate of candidates) {
         // Optimistic lock: `updatedAt` changes on every write, so a second
-        // worker that got the same candidate updates nothing.
+        // worker that got the same candidate updates nothing. The fresh token
+        // is what makes the previous holder's completion stale.
+        const leaseToken = randomUUID();
         const { count } = await client.sensorLoggerUpload.updateMany({
           where: { id: candidate.id, updatedAt: candidate.updatedAt },
-          data: { status: 'CLAIMED', claimedAt: new Date(), attempts: candidate.attempts + 1 },
+          data: {
+            status: 'CLAIMED',
+            claimedAt: new Date(),
+            attempts: candidate.attempts + 1,
+            leaseToken,
+          },
         });
         if (count === 1) {
           claimed.push({
             studyId: candidate.studyId,
             uploadId: candidate.uploadId,
             attempts: candidate.attempts + 1,
+            leaseToken,
           });
         }
       }
       return claimed;
     },
 
-    async isKnown(upload): Promise<boolean> {
+    async hasActiveLease({ studyId, uploadId, leaseToken }): Promise<boolean> {
       const row = await client.sensorLoggerUpload.findUnique({
-        where: { studyId_uploadId: upload },
-        select: { id: true },
+        where: { studyId_uploadId: { studyId, uploadId } },
+        select: { status: true, leaseToken: true },
       });
-      return row !== null;
+      return row !== null && row.status === 'CLAIMED' && row.leaseToken === leaseToken;
     },
 
     async complete(record: CompletionRecord): Promise<boolean> {
       const { count } = await client.sensorLoggerUpload.updateMany({
-        where: { studyId: record.studyId, uploadId: record.uploadId },
+        // Scoped to the lease: a worker whose lease expired mid-scan writes
+        // nothing over the newer holder's row.
+        where: {
+          studyId: record.studyId,
+          uploadId: record.uploadId,
+          status: 'CLAIMED',
+          leaseToken: record.leaseToken,
+        },
         data: {
           status: record.status,
           completedAt: new Date(),

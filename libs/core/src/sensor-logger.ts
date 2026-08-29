@@ -233,11 +233,21 @@ export function scanToReports(
 export const SENSOR_LOGGER_JOB_STATUSES = ['PENDING', 'CLAIMED', 'DONE', 'FAILED'] as const;
 export type SensorLoggerJobStatus = (typeof SENSOR_LOGGER_JOB_STATUSES)[number];
 
-/** Worker -> server completion report for a claimed upload. */
+/**
+ * A lease token is minted per claim, so a completion proves the worker still
+ * holds the upload it is reporting on.
+ */
+export const leaseTokenSchema = z
+  .string()
+  .min(8)
+  .max(128)
+  .regex(/^[A-Za-z0-9._-]+$/);
+
 export const sensorLoggerCompletionSchema = z
   .object({
     studyId: identifierSchema,
     uploadId: identifierSchema,
+    leaseToken: leaseTokenSchema,
     /** Bytes downloaded from the Study API, for capacity monitoring. */
     bytes: z.number().int().min(0).max(2_000_000_000).optional(),
     scan: bridgeScanResultSchema.optional(),

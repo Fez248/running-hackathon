@@ -403,12 +403,17 @@ class SidewalkClient:
         self,
         study_id: str,
         upload_id: str,
+        lease_token: str,
         *,
         scan: dict[str, Any] | None = None,
         bytes_downloaded: int | None = None,
         error: str | None = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"studyId": study_id, "uploadId": upload_id}
+        body: dict[str, Any] = {
+            "studyId": study_id,
+            "uploadId": upload_id,
+            "leaseToken": lease_token,
+        }
         if bytes_downloaded is not None:
             body["bytes"] = bytes_downloaded
         if scan is not None:
@@ -423,6 +428,7 @@ class SidewalkClient:
 def process_upload(
     study_id: str,
     upload_id: str,
+    lease_token: str,
     config: SyncConfig,
     client: SidewalkClient,
     *,
@@ -453,7 +459,7 @@ def process_upload(
                 "error": message,
             }
             try:
-                client.complete(study_id, upload_id, error=message)
+                client.complete(study_id, upload_id, lease_token, error=message)
             except SyncError as report_exc:
                 # The server could not record the failure, so the lease will
                 # expire and the upload be retried. Other claimed uploads still
@@ -463,7 +469,11 @@ def process_upload(
 
         try:
             response = client.complete(
-                study_id, upload_id, scan=scan_payload(result), bytes_downloaded=size
+                study_id,
+                upload_id,
+                lease_token,
+                scan=scan_payload(result),
+                bytes_downloaded=size,
             )
         except SyncError as exc:
             return {
@@ -510,12 +520,20 @@ def sync_once(
     sidewalk = client or SidewalkClient(config, opener=opener)
     results: list[dict[str, Any]] = []
     for upload in sidewalk.claim():
-        study_id, upload_id = upload.get("studyId"), upload.get("uploadId")
-        if not study_id or not upload_id:
+        study_id = upload.get("studyId")
+        upload_id = upload.get("uploadId")
+        lease_token = upload.get("leaseToken")
+        if not study_id or not upload_id or not lease_token:
             continue
         results.append(
             process_upload(
-                study_id, upload_id, config, sidewalk, opener=opener, threshold=threshold
+                study_id,
+                upload_id,
+                lease_token,
+                config,
+                sidewalk,
+                opener=opener,
+                threshold=threshold,
             )
         )
     return results

@@ -212,27 +212,33 @@ describe('bridgeScanResultSchema', () => {
 });
 
 describe('sensorLoggerCompletionSchema', () => {
+  const lease = { studyId: 's', uploadId: 'u', leaseToken: 'lease-token-1' };
+
   it('requires either a scan or an error', () => {
+    expect(sensorLoggerCompletionSchema.safeParse(lease).success).toBe(false);
     expect(
-      sensorLoggerCompletionSchema.safeParse({ studyId: 's', uploadId: 'u' }).success,
+      sensorLoggerCompletionSchema.safeParse({ ...lease, error: 'download failed' }).success,
+    ).toBe(true);
+    expect(
+      sensorLoggerCompletionSchema.safeParse({ ...lease, scan, bytes: 245407 }).success,
+    ).toBe(true);
+  });
+
+  it('requires the lease token that proves the worker still holds the upload', () => {
+    expect(
+      sensorLoggerCompletionSchema.safeParse({ studyId: 's', uploadId: 'u', scan }).success,
     ).toBe(false);
     expect(
-      sensorLoggerCompletionSchema.safeParse({ studyId: 's', uploadId: 'u', error: 'download failed' })
-        .success,
-    ).toBe(true);
+      sensorLoggerCompletionSchema.safeParse({ ...lease, leaseToken: 'short', scan }).success,
+    ).toBe(false);
     expect(
-      sensorLoggerCompletionSchema.safeParse({ studyId: 's', uploadId: 'u', scan, bytes: 245407 })
-        .success,
-    ).toBe(true);
+      sensorLoggerCompletionSchema.safeParse({ ...lease, leaseToken: 'has spaces!!', scan }).success,
+    ).toBe(false);
   });
 
   it('refuses a completion that smuggles a secret-sized blob', () => {
     expect(
-      sensorLoggerCompletionSchema.safeParse({
-        studyId: 's',
-        uploadId: 'u',
-        error: 'x'.repeat(1001),
-      }).success,
+      sensorLoggerCompletionSchema.safeParse({ ...lease, error: 'x'.repeat(1001) }).success,
     ).toBe(false);
   });
 });

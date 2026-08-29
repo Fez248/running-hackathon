@@ -55,7 +55,7 @@ export interface SensorLoggerConfig {
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export function sensorLoggerConfigFromEnv(
@@ -82,11 +82,14 @@ export interface ClaimedUpload {
   studyId: string;
   uploadId: string;
   attempts: number;
+  /** Proof of this lease; the worker must echo it back when completing. */
+  leaseToken: string;
 }
 
 export interface CompletionRecord {
   studyId: string;
   uploadId: string;
+  leaseToken: string;
   status: 'DONE' | 'FAILED';
   bytes?: number;
   findingCount?: number;
@@ -105,9 +108,12 @@ export interface SensorLoggerUploadStore {
   enqueue(upload: { studyId: string; uploadId: string }): Promise<EnqueueResult>;
   /** Lease up to `limit` uploads, reclaiming leases older than `staleBefore`. */
   claim(options: { limit: number; staleBefore: Date; maxAttempts: number }): Promise<ClaimedUpload[]>;
-  /** Whether this upload was ever webhooked. Checked before a scan touches the map. */
-  isKnown(upload: { studyId: string; uploadId: string }): Promise<boolean>;
-  /** Close out a leased upload. `false` when no such upload is known. */
+  /**
+   * Whether this exact lease is still the current one. Checked before a scan
+   * touches the map, so a worker cannot report on an upload it does not hold.
+   */
+  hasActiveLease(lease: { studyId: string; uploadId: string; leaseToken: string }): Promise<boolean>;
+  /** Close out a leased upload. `false` when the lease is no longer held. */
   complete(record: CompletionRecord): Promise<boolean>;
 }
 
@@ -248,36 +254,36 @@ export async function handleSensorLoggerCompletion(
   const parsed = sensorLoggerCompletionSchema.safeParse(parsedJson.value);
   if (!parsed.success) return json({ error: 'invalid-payload', issues: parsed.error.issues }, 400);
 
-  const { studyId, uploadId, scan, bytes, error } = parsed.data;
-  // Checked before anything is written: a completion for an upload nobody
-  // webhooked must not leave reports on the map behind its 404.
-  if (!(await deps.store.isKnown({ studyId, uploadId }))) {
-    return json({ error: 'unknown-upload' }, 404);
+  const { studyId, uploadId, leaseToken, scan, bytes, error } = parsed.data;
+  // Checked before anything is written: only the worker currently holding the
+  // lease may report on it, so neither an upload nobody webhooked nor one that
+  // has since been handed to another worker can leave reports behind a 409.
+  const lease = { studyId, uploadId, leaseToken };
+  if (!(await deps.store.hasActiveLease(lease))) {
+    return json({ error: 'lease-not-held' }, 409);
   }
 
   if (!scan) {
-    const known = await deps.store.complete({
-      studyId,
-      uploadId,
+    const held = await deps.store.complete({
+      ...lease,
       status: 'FAILED',
       bytes,
       error: error ?? 'unspecified worker failure',
     });
-    return known ? json({ status: 'failed' }, 200) : json({ error: 'unknown-upload' }, 404);
+    return held ? json({ status: 'failed' }, 200) : json({ error: 'lease-not-held' }, 409);
   }
 
   const reports = scanToReports({ studyId, uploadId }, scan);
   const reportCount = reports.length > 0 ? await deps.createReports(reports) : 0;
-  const known = await deps.store.complete({
-    studyId,
-    uploadId,
+  const held = await deps.store.complete({
+    ...lease,
     status: 'DONE',
     bytes,
     findingCount: scan.findings.length,
     reportCount,
     quality: scan.quality.verdict,
   });
-  if (!known) return json({ error: 'unknown-upload' }, 404);
+  if (!held) return json({ error: 'lease-not-held' }, 409);
 
   return json(
     {
