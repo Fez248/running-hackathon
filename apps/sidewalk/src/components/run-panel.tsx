@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { OBSTACLE_LABELS, type ObstacleKind } from '@sidewalk/core';
+import { OBSTACLE_LABELS, VOICE_METER_BARS, meterBars, type ObstacleKind } from '@sidewalk/core';
 import type { RunStatus } from '@/hooks/use-run-tracker';
-import type { VoiceUtterance } from '@/hooks/use-voice-reporter';
+import type { MicrophoneState, VoiceUtterance } from '@/hooks/use-voice-reporter';
 
 interface RunPanelProps {
   status: RunStatus;
@@ -18,12 +18,18 @@ interface RunPanelProps {
   voice: {
     enabled: boolean;
     supported: boolean;
+    micState: MicrophoneState;
     listening: boolean;
+    starting: boolean;
+    /** Live microphone level, 0..1, for the input meter. */
+    level: number;
     interim: string;
     error: string | null;
     utterances: VoiceUtterance[];
   };
   onToggleVoice: (enabled: boolean) => void;
+  onCancelPhrase: () => void;
+  onRetryMic: () => void;
   onTypedReport: (text: string) => void;
   voiceStatus: string | null;
   /** Coverage query failure: the fog is stale, which is otherwise invisible. */
@@ -49,11 +55,22 @@ export function RunPanel({
   onStop,
   voice,
   onToggleVoice,
+  onCancelPhrase,
+  onRetryMic,
   onTypedReport,
   voiceStatus,
   fogError = null,
 }: RunPanelProps) {
   const [typed, setTyped] = useState('');
+  const micBlocked = voice.micState === 'denied' || voice.micState === 'unavailable';
+  const bars = meterBars(voice.level);
+  const voiceStateLabel = voice.starting
+    ? '· opening microphone'
+    : voice.listening
+      ? '· listening'
+      : micBlocked
+        ? '· microphone blocked'
+        : '';
 
   return (
     <div className="card">
@@ -118,24 +135,45 @@ export function RunPanel({
         <input
           type="checkbox"
           checked={voice.enabled}
-          disabled={!voice.supported || !status.active}
-          onChange={(event) => onToggleVoice(event.target.checked)}
+          disabled={!voice.supported || !status.active || micBlocked || voice.starting}
+          onChange={(event) => void onToggleVoice(event.target.checked)}
         />
-        Ambient voice reporting {voice.listening ? '· listening' : ''}
+        Ambient voice reporting {voiceStateLabel}
       </label>
+
+      {voice.listening ? (
+        <div className="voice-live">
+          <div className="meter" aria-hidden="true">
+            {Array.from({ length: VOICE_METER_BARS }, (_, index) => (
+              <span key={index} className="bar" data-on={index < bars ? '' : undefined} />
+            ))}
+          </div>
+          <span className="muted">{bars === 0 ? 'mic open, nothing heard' : 'hearing you'}</span>
+          <button type="button" onClick={onCancelPhrase}>
+            Discard phrase
+          </button>
+        </div>
+      ) : null}
 
       <p className="muted">
         {!voice.supported
           ? 'This browser has no Web Speech API (Firefox ships it disabled) — type the report instead.'
-          : status.active
-            ? 'Audio is only captured while this is on. Recognition runs in your browser’s speech service; only the transcript and your coordinate are stored.'
-            : 'Start a run to dictate reports — an utterance is placed at your latest accepted GPS fix.'}
+          : micBlocked
+            ? 'Dictation needs the microphone. Chrome: click the icon left of the address bar → Site settings → Microphone → Allow, then re-check below.'
+            : status.active
+              ? 'Audio is only captured while this is on, and the microphone is released the moment you switch it off. Recognition runs in your browser’s speech service; only the transcript and your coordinate are stored.'
+              : 'Start a run to dictate reports — an utterance is placed at your latest accepted GPS fix.'}
       </p>
       {voice.interim ? <p className="interim">“{voice.interim}”</p> : null}
       {voice.error ? (
         <p className="error" role="alert">
           {voice.error}
         </p>
+      ) : null}
+      {micBlocked ? (
+        <button type="button" onClick={onRetryMic}>
+          Re-check microphone
+        </button>
       ) : null}
       <p className="muted live-status" role="status">
         {voiceStatus}
@@ -175,7 +213,12 @@ export function RunPanel({
                   {utterance.parsed.heightCm != null ? ` · ${utterance.parsed.heightCm} cm` : ''}
                 </div>
               ) : (
-                <div className="muted">→ no sidewalk feature recognised, ignored</div>
+                <div className="row">
+                  <span className="muted">→ no sidewalk feature recognised</span>
+                  <button type="button" onClick={() => setTyped(utterance.transcript)}>
+                    Edit and retry
+                  </button>
+                </div>
               )}
             </div>
           ))}
