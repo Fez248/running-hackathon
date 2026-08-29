@@ -1,0 +1,99 @@
+// Sidewalk Map — hackathon schema.
+// SQLite has no spatial types, so coordinates are plain floats and viewport
+// queries use indexed lat/lng range scans.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  handle      String   @unique
+  displayName String?
+  /// WHEELCHAIR | STROLLER | COURIER | DELIVERY_ROBOT
+  profile     String?
+  points      Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  reports Report[]
+  votes   Vote[]
+  traces  Trace[]
+}
+
+/// A single crowdsourced observation, usually captured while moving.
+model Report {
+  id        String @id @default(cuid())
+  lat       Float
+  lng       Float
+  /// Snapped grid cell (see @sidewalk/core gridKey) used to cluster duplicates.
+  gridKey   String
+  /// CURB | STEPS | ROADWORKS | CROSSING | NARROW_PATH | BLOCKED | STEEP_SLOPE | ROUGH_SURFACE
+  kind      String
+  /// PASSABLE | DIFFICULT | IMPASSABLE | UNKNOWN
+  passability String @default("UNKNOWN")
+  heightCm  Int?
+  widthCm   Int?
+  note      String?
+  photoUrl  String?
+  accuracyM Float?
+  /// Profile of the reporter at capture time.
+  capturedByProfile String?
+  /// Idempotency key from the client so offline replays do not duplicate.
+  clientReportId String? @unique
+
+  agreeCount    Int   @default(0)
+  disagreeCount Int   @default(0)
+  confidence    Float @default(0.5)
+  status        String @default("ACTIVE") // ACTIVE | RESOLVED | REJECTED
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  traceId String?
+  trace   Trace?  @relation(fields: [traceId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  votes Vote[]
+
+  @@index([lat, lng])
+  @@index([kind])
+  @@index([gridKey])
+  @@index([createdAt])
+}
+
+/// Confirm / dispute signal from another contributor.
+model Vote {
+  id       String @id @default(cuid())
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  userId   String?
+  user     User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  agree    Boolean
+  createdAt DateTime @default(now())
+
+  @@unique([reportId, userId])
+  @@index([reportId])
+}
+
+/// A run/ride session; reports captured during it hang off the trace.
+model Trace {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Encoded polyline or JSON array of [lat, lng, t] points.
+  path      String
+  distanceM Float    @default(0)
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+
+  reports Report[]
+
+  @@index([userId])
+}

@@ -1,0 +1,149 @@
+import { TRPCError } from '@trpc/server';
+import { z } from 'zod';
+import {
+  boundsSchema,
+  confidence,
+  createReportSchema,
+  gridKey,
+  passabilityForProfile,
+  profileSchema,
+  type Passability,
+  voteSchema,
+} from '@sidewalk/core';
+import { createTRPCRouter, publicProcedure } from '../trpc';
+
+export const reportRouter = createTRPCRouter({
+  /** Everything visible in the current map viewport. */
+  byBounds: publicProcedure.input(boundsSchema).query(async ({ ctx, input }) => {
+    const reports = await ctx.prisma.report.findMany({
+      where: {
+        status: 'ACTIVE',
+        lat: { gte: input.minLat, lte: input.maxLat },
+        lng: { gte: input.minLng, lte: input.maxLng },
+        ...(input.kinds?.length ? { kind: { in: input.kinds } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: input.limit,
+    });
+
+    return reports.map((report) => ({
+      ...report,
+      effectivePassability: input.profile
+        ? passabilityForProfile(input.profile, {
+            heightCm: report.heightCm,
+            widthCm: report.widthCm,
+            passability: report.passability as Passability,
+          })
+        : (report.passability as Passability),
+    }));
+  }),
+
+  byId: publicProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    const report = await ctx.prisma.report.findUnique({
+      where: { id: input.id },
+      include: { author: true, votes: true },
+    });
+    if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
+    return report;
+  }),
+
+  /** One-tap capture while running/riding. Idempotent on clientReportId. */
+  create: publicProcedure.input(createReportSchema).mutation(async ({ ctx, input }) => {
+    if (input.clientReportId) {
+      const existing = await ctx.prisma.report.findUnique({
+        where: { clientReportId: input.clientReportId },
+      });
+      if (existing) return existing;
+    }
+
+    return ctx.prisma.report.create({
+      data: {
+        lat: input.lat,
+        lng: input.lng,
+        gridKey: gridKey({ lat: input.lat, lng: input.lng }),
+        kind: input.kind,
+        passability: input.passability,
+        heightCm: input.heightCm ?? null,
+        widthCm: input.widthCm ?? null,
+        note: input.note ?? null,
+        photoUrl: input.photoUrl ?? null,
+        accuracyM: input.accuracyM ?? null,
+        capturedByProfile: input.capturedByProfile ?? null,
+        clientReportId: input.clientReportId ?? null,
+        authorId: ctx.user?.id ?? null,
+        confidence: confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }),
+      },
+    });
+  }),
+
+  /** Offline queue flush: send everything captured while out of signal. */
+  createMany: publicProcedure
+    .input(z.object({ reports: z.array(createReportSchema).min(1).max(200) }))
+    .mutation(async ({ ctx, input }) => {
+      const created: string[] = [];
+      for (const report of input.reports) {
+        const row = await ctx.prisma.report.upsert({
+          where: { clientReportId: report.clientReportId ?? `anon-${crypto.randomUUID()}` },
+          update: {},
+          create: {
+            lat: report.lat,
+            lng: report.lng,
+            gridKey: gridKey({ lat: report.lat, lng: report.lng }),
+            kind: report.kind,
+            passability: report.passability,
+            heightCm: report.heightCm ?? null,
+            widthCm: report.widthCm ?? null,
+            note: report.note ?? null,
+            accuracyM: report.accuracyM ?? null,
+            capturedByProfile: report.capturedByProfile ?? null,
+            clientReportId: report.clientReportId ?? null,
+            authorId: ctx.user?.id ?? null,
+            confidence: confidence({
+              agreeCount: 0,
+              disagreeCount: 0,
+              accuracyM: report.accuracyM,
+            }),
+          },
+        });
+        created.push(row.id);
+      }
+      return { ids: created, count: created.length };
+    }),
+
+  /** Confirm or dispute someone else's report. */
+  vote: publicProcedure.input(voteSchema).mutation(async ({ ctx, input }) => {
+    const report = await ctx.prisma.report.findUnique({ where: { id: input.reportId } });
+    if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
+
+    if (ctx.user) {
+      await ctx.prisma.vote.upsert({
+        where: { reportId_userId: { reportId: input.reportId, userId: ctx.user.id } },
+        update: { agree: input.agree },
+        create: { reportId: input.reportId, userId: ctx.user.id, agree: input.agree },
+      });
+    } else {
+      await ctx.prisma.vote.create({ data: { reportId: input.reportId, agree: input.agree } });
+    }
+
+    const [agreeCount, disagreeCount] = await Promise.all([
+      ctx.prisma.vote.count({ where: { reportId: input.reportId, agree: true } }),
+      ctx.prisma.vote.count({ where: { reportId: input.reportId, agree: false } }),
+    ]);
+
+    return ctx.prisma.report.update({
+      where: { id: input.reportId },
+      data: {
+        agreeCount,
+        disagreeCount,
+        confidence: confidence({ agreeCount, disagreeCount, accuracyM: report.accuracyM }),
+        status: disagreeCount >= 3 && disagreeCount > agreeCount * 2 ? 'REJECTED' : report.status,
+      },
+    });
+  }),
+
+  resolve: publicProcedure
+    .input(z.object({ id: z.string(), profile: profileSchema.optional() }))
+    .mutation(({ ctx, input }) =>
+      ctx.prisma.report.update({ where: { id: input.id }, data: { status: 'RESOLVED' } }),
+    ),
+});
