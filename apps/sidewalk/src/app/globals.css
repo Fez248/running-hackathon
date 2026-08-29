@@ -180,3 +180,59 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
 }
+
+.error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.badge[data-gps] {
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  align-self: center;
+}
+
+.badge[data-gps='precise'] {
+  color: var(--accent);
+  border-color: rgba(74, 222, 128, 0.4);
+}
+
+.badge[data-gps='coarse'] {
+  color: var(--warn);
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.badge[data-gps='poor'] {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.toggle input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.interim {
+  font-size: 13px;
+  font-style: italic;
+  color: #38bdf8;
+  margin: 6px 0;
+}
+
+.utterances {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.fog-canvas {
+  pointer-events: none;
+}

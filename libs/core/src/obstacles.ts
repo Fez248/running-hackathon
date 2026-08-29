@@ -21,7 +21,12 @@ export type Passability = (typeof PASSABILITY)[number];
 export const PROFILES = ['WHEELCHAIR', 'STROLLER', 'COURIER', 'DELIVERY_ROBOT'] as const;
 export type Profile = (typeof PROFILES)[number];
 
+/** How an observation reached the map. */
+export const REPORT_SOURCES = ['MANUAL', 'VOICE'] as const;
+export type ReportSource = (typeof REPORT_SOURCES)[number];
+
 export const obstacleKindSchema = z.enum(OBSTACLE_KINDS);
+export const reportSourceSchema = z.enum(REPORT_SOURCES);
 export const passabilitySchema = z.enum(PASSABILITY);
 export const profileSchema = z.enum(PROFILES);
 
@@ -49,6 +54,11 @@ export const createReportSchema = z.object({
   capturedByProfile: profileSchema.optional(),
   /** GPS accuracy in metres, used to weight confidence. */
   accuracyM: z.number().min(0).max(500).optional(),
+  source: reportSourceSchema.default('MANUAL'),
+  /** Raw dictated utterance when `source` is VOICE. */
+  transcript: z.string().max(500).optional(),
+  /** Run this report was captured during. */
+  traceId: z.string().optional(),
   clientReportId: z.string().min(1).max(64).optional(),
 });
 export type CreateReportInput = z.infer<typeof createReportSchema>;
