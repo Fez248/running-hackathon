@@ -288,6 +288,24 @@ button:disabled {
   margin-top: 8px;
 }
 
+.reasons {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+.reasons li {
+  margin: 2px 0;
+}
+
+/* The state is also stated in text; the border is a second, redundant cue. */
+.card[data-permission='denied'] {
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.card[data-permission='granted'] {
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
 .fog-canvas {
   pointer-events: none;
 }

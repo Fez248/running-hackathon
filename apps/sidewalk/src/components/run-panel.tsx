@@ -1,7 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { OBSTACLE_LABELS, VOICE_METER_BARS, meterBars, type ObstacleKind } from '@sidewalk/core';
+import {
+  OBSTACLE_LABELS,
+  VOICE_METER_BARS,
+  meterBars,
+  type LocationPermissionState,
+  type ObstacleKind,
+} from '@sidewalk/core';
 import type { RunStatus } from '@/hooks/use-run-tracker';
 import type { MicrophoneState, VoiceUtterance } from '@/hooks/use-voice-reporter';
 
@@ -15,6 +21,8 @@ interface RunPanelProps {
   onToggleFollow: (follow: boolean) => void;
   onStart: () => void;
   onStop: () => void;
+  /** Blocks the start button when the browser will refuse to track at all. */
+  locationState: LocationPermissionState;
   voice: {
     enabled: boolean;
     supported: boolean;
@@ -53,6 +61,7 @@ export function RunPanel({
   onToggleFollow,
   onStart,
   onStop,
+  locationState,
   voice,
   onToggleVoice,
   onCancelPhrase,
@@ -71,6 +80,7 @@ export function RunPanel({
       : micBlocked
         ? '· microphone blocked'
         : '';
+  const locationBlocked = locationState === 'denied' || locationState === 'unavailable';
 
   return (
     <div className="card">
@@ -86,8 +96,8 @@ export function RunPanel({
             Stop run
           </button>
         ) : (
-          <button className="primary" type="button" onClick={onStart}>
-            Start run
+          <button className="primary" type="button" onClick={onStart} disabled={locationBlocked}>
+            {locationState === 'granted' ? 'Start run' : 'Start run (asks for location)'}
           </button>
         )}
         <span className="badge" data-gps={status.quality} role="status">
@@ -104,6 +114,11 @@ export function RunPanel({
           ? ` · ${REJECTION_LABELS[status.lastRejection] ?? status.lastRejection}`
           : ''}
       </p>
+      {locationBlocked && !status.active ? (
+        <p className="muted">
+          Location access is off, so a run cannot start — see the location panel above.
+        </p>
+      ) : null}
       {status.error ? (
         <p className="error" role="alert">
           {status.error}
