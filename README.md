@@ -61,7 +61,7 @@ python -m bridge.cli scan --demo                 # no hardware needed
 python -m bridge.cli scan ~/Downloads/run.zip --out found.geojson --format geojson
 ```
 
-Recording a real pass — logging apps, the ≥100 Hz (50-100 Hz is scanned as degraded)
+Recording a real pass — logging apps, the ≥100 Hz (41-100 Hz is scanned as degraded)
 / ≤3 m GPS / gravity-included acceptance checks, and how to read the output — is in
 [apps/bridge/docs/REAL_WORLD_TEST.md](./apps/bridge/docs/REAL_WORLD_TEST.md).
 

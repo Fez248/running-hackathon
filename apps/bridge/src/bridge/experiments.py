@@ -1,4 +1,4 @@
-"""Feasibility experiments E1-E5 (reproducible, seeded)."""
+"""Feasibility experiments E1-E6 (reproducible, seeded)."""
 
 from __future__ import annotations
 
@@ -262,17 +262,20 @@ def e5_robustness(seed: int = 7) -> ExperimentResult:
     )
 
 
-def e6_sample_rate_gate(seeds: tuple[int, ...] = (1, 2, 3, 4, 5)) -> ExperimentResult:
+def e6_sample_rate_gate(seeds: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) -> ExperimentResult:
     """How detection degrades below the 100 Hz requirement, per rate.
 
     E5 sweeps the rate on a single seed and reports F1 only, which cannot
     distinguish "the detector starts lying" from "the detector stops seeing".
     Averaging precision and recall separately over seeds does, and that is what
-    the capture gate grades on: sub-100 Hz captures keep their precision and
-    lose recall, so they are reported as degraded rather than withheld.
+    the capture gate grades on: sub-100 Hz captures lose recall while their
+    precision stays at or above the 100 Hz baseline, so they are reported as
+    degraded rather than withheld. The rates bracket both gate boundaries -
+    ``FLOOR_FS_HZ`` (35/40/41) and ``MIN_FS_HZ`` (90/99/100) - because a
+    threshold is only justified by what happens on either side of it.
     """
     rows = []
-    for fs in (40.0, 50.0, 60.0, 75.0, 100.0, 200.0):
+    for fs in (35.0, 40.0, 41.0, 45.0, 50.0, 60.0, 75.0, 90.0, 99.0, 100.0, 200.0):
         evs = []
         for s in seeds:
             pp, truth, _ = _make_pass(s, fs=fs)
@@ -283,6 +286,7 @@ def e6_sample_rate_gate(seeds: tuple[int, ...] = (1, 2, 3, 4, 5)) -> ExperimentR
                 "precision": round(float(np.mean([e.precision for e in evs])), 3),
                 "recall": round(float(np.mean([e.recall for e in evs])), 3),
                 "f1": round(float(np.mean([e.f1 for e in evs])), 3),
+                "false_positives": int(sum(e.fp for e in evs)),
             }
         )
     return ExperimentResult(

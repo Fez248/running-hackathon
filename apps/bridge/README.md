@@ -68,9 +68,9 @@ time column plus x/y/z acceleration and an optional `t,lat,lon[,accuracy_m]` GPS
 The accelerometer stream must still contain **gravity** - the vertical projection
 needs it - and should be sampled at **>=100 Hz** with GPS accuracy **<=3 m**, the two
 requirements E5 in the feasibility study derived. Sample rate is graded rather than
-gating: 50-100 Hz is scanned as `degraded` because E6 shows precision holds there
-while recall roughly halves, and only below 50 Hz - where the whole 20-45 Hz shock
-band is above Nyquist - is a recording refused.
+gating: 41-100 Hz is scanned as `degraded` because E6 shows precision there matches
+or beats 100 Hz while recall roughly halves, and only at or below 40 Hz - where the
+whole 20-45 Hz shock band is above Nyquist - is a recording refused.
 
 **Output.** A printed report, plus `--out` in `json` (full result incl. quality
 metrics), `csv`, or `geojson` (`ROUGH_SURFACE` points ready for the Sidewalk Map

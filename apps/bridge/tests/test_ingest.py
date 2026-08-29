@@ -8,7 +8,7 @@ from imukit.geo import cumulative_distance, position_at_distance
 
 from bridge.experiments import ROUTE_ANOMALIES
 from bridge.ingest import load_recording, write_export_dir
-from bridge.quality import assess
+from bridge.quality import FLOOR_FS_HZ, assess
 from bridge.scan import CONFIDENCE_BY_VERDICT, scan_recording, to_csv, to_geojson
 from bridge.synth import SurfaceScenario, simulate_pass
 
@@ -136,8 +136,9 @@ def test_sub_100hz_capture_is_degraded_but_still_reports_findings(tmp_path):
     assert any("not evidence of a sound surface" in n for n in result.notes)
 
 
-def test_sample_rate_below_the_floor_is_unusable(tmp_path):
-    trace, gps, _ = _short_pass(fs=40.0)
+@pytest.mark.parametrize("fs", [35.0, FLOOR_FS_HZ])
+def test_sample_rate_at_or_below_the_nyquist_floor_is_unusable(tmp_path, fs):
+    trace, gps, _ = _short_pass(fs=fs)
     write_export_dir(tmp_path / "rec", trace, gps)
 
     result, pp = scan_recording(load_recording(tmp_path / "rec"))
@@ -145,8 +146,20 @@ def test_sample_rate_below_the_floor_is_unusable(tmp_path):
     assert result.findings == []
     assert result.quality.verdict == "unusable"
     assert not result.quality.rate_limited
-    assert result.quality.shock_band_covered_frac == pytest.approx(0.0, abs=1e-9)
+    assert result.quality.shock_band_covered_frac == 0.0
     assert any("Nyquist" in p for p in result.quality.problems)
+
+
+def test_just_above_the_floor_is_graded_not_refused(tmp_path):
+    """The floor is the Nyquist condition, not a round number: 41 Hz still sees
+    the bottom of the shock band and E6 scores it as precisely as 100 Hz."""
+    trace, gps, _ = _short_pass(fs=FLOOR_FS_HZ + 1.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    q = assess(load_recording(tmp_path / "rec"))
+    assert q.verdict == "degraded"
+    assert q.rate_limited
+    assert 0.0 < q.shock_band_covered_frac < 0.1
 
 
 def test_full_rate_capture_keeps_the_unqualified_verdict(tmp_path):

@@ -98,8 +98,9 @@ def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, 
 
     if quality.rate_limited:
         notes.append(
-            f"sampled below {MIN_FS_HZ:.0f} Hz: reported findings are still precise, but roughly half "
-            "the defects are missed — an empty result is not evidence of a sound surface"
+            f"sampled below {MIN_FS_HZ:.0f} Hz: reported findings are as reliable as a {MIN_FS_HZ:.0f} Hz "
+            "pass's, but roughly half the defects are missed — an empty result is not evidence of a "
+            "sound surface"
         )
 
     pp = process_pass(rec.trace, rec.gps)

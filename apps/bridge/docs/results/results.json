@@ -491,50 +491,96 @@
   },
   "E6_sample_rate_gate": {
     "summary": {
-      "fs=40Hz": "P 1.00 / R 0.33",
+      "fs=35Hz": "P 0.90 / R 0.30",
+      "fs=40Hz": "P 0.95 / R 0.33",
+      "fs=41Hz": "P 1.00 / R 0.33",
+      "fs=45Hz": "P 1.00 / R 0.37",
       "fs=50Hz": "P 1.00 / R 0.33",
       "fs=60Hz": "P 1.00 / R 0.67",
       "fs=75Hz": "P 1.00 / R 0.33",
-      "fs=100Hz": "P 0.95 / R 0.73",
-      "fs=200Hz": "P 1.00 / R 0.80"
+      "fs=90Hz": "P 0.97 / R 0.67",
+      "fs=99Hz": "P 0.93 / R 0.70",
+      "fs=100Hz": "P 0.94 / R 0.70",
+      "fs=200Hz": "P 0.91 / R 0.90"
     },
     "detail": {
       "rows": [
         {
+          "fs_hz": 35.0,
+          "precision": 0.9,
+          "recall": 0.3,
+          "f1": 0.45,
+          "false_positives": 0
+        },
+        {
           "fs_hz": 40.0,
+          "precision": 0.95,
+          "recall": 0.333,
+          "f1": 0.49,
+          "false_positives": 1
+        },
+        {
+          "fs_hz": 41.0,
           "precision": 1.0,
           "recall": 0.333,
-          "f1": 0.5
+          "f1": 0.5,
+          "false_positives": 0
+        },
+        {
+          "fs_hz": 45.0,
+          "precision": 1.0,
+          "recall": 0.367,
+          "f1": 0.53,
+          "false_positives": 0
         },
         {
           "fs_hz": 50.0,
           "precision": 1.0,
           "recall": 0.333,
-          "f1": 0.5
+          "f1": 0.5,
+          "false_positives": 0
         },
         {
           "fs_hz": 60.0,
           "precision": 1.0,
           "recall": 0.667,
-          "f1": 0.8
+          "f1": 0.8,
+          "false_positives": 0
         },
         {
           "fs_hz": 75.0,
           "precision": 1.0,
           "recall": 0.333,
-          "f1": 0.5
+          "f1": 0.5,
+          "false_positives": 0
+        },
+        {
+          "fs_hz": 90.0,
+          "precision": 0.967,
+          "recall": 0.667,
+          "f1": 0.787,
+          "false_positives": 1
+        },
+        {
+          "fs_hz": 99.0,
+          "precision": 0.933,
+          "recall": 0.7,
+          "f1": 0.793,
+          "false_positives": 2
         },
         {
           "fs_hz": 100.0,
-          "precision": 0.95,
-          "recall": 0.733,
-          "f1": 0.811
+          "precision": 0.942,
+          "recall": 0.7,
+          "f1": 0.792,
+          "false_positives": 2
         },
         {
           "fs_hz": 200.0,
-          "precision": 1.0,
-          "recall": 0.8,
-          "f1": 0.88
+          "precision": 0.91,
+          "recall": 0.9,
+          "f1": 0.886,
+          "false_positives": 4
         }
       ],
       "seeds": [
@@ -542,7 +588,12 @@
         2,
         3,
         4,
-        5
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
       ]
     }
   }

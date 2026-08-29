@@ -52,7 +52,7 @@ evidence about the recording, not about the idea. Implemented in
 
 | Check | Unusable | Degraded (still scanned) |
 | --- | --- | --- |
-| IMU sample rate | < 50 Hz (20-45 Hz shock band entirely above Nyquist) | < 150 Hz (200 Hz keeps the 20-80 Hz shock band); < 100 Hz also warns that ~half the defects are missed (E6) |
+| IMU sample rate | ≤ 40 Hz (20-45 Hz shock band entirely above Nyquist) | < 150 Hz (200 Hz keeps the 20-80 Hz shock band); < 100 Hz also warns that ~half the defects are missed (E6) |
 | Pass duration | < 30 s | — |
 | Gravity in the stream | DC \|a\| outside 0.5-2.0 g | — |
 | GPS track | missing, or fewer than 2 fixes | no accuracy column |
@@ -63,11 +63,11 @@ evidence about the recording, not about the idea. Implemented in
 A pass is worth analysing when the verdict is `OK` (or `DEGRADED` with only the
 sample-rate or accuracy warning) — otherwise fix the capture and walk it again.
 
-A 50-100 Hz capture is graded, not rejected: E6 shows precision holds at those
-rates while recall roughly halves, so the findings it does report are as
-trustworthy as a fast capture's and are emitted with the usual `degraded`
-confidence — but an *empty* result from such a pass says nothing about the
-surface, and `scan` says so in a note.
+A 41-100 Hz capture is graded, not rejected: E6 shows precision at those rates
+matches or beats 100 Hz while recall roughly halves, so the findings it does
+report are as trustworthy as a fast capture's and are emitted with the usual
+`degraded` confidence — but an *empty* result from such a pass says nothing about
+the surface, and `scan` says so in a note.
 
 ## 4. Scanning
 

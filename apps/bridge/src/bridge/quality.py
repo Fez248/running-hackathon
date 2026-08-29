@@ -9,13 +9,13 @@ A detection run on a recording that fails those checks is not evidence about the
 idea, it is evidence about the recording, so the CLI reports the verdict *before*
 the detections and marks the detections untrustworthy when the capture is unfit.
 
-Sample rate is graded rather than binary. A seeded sweep over 20 routes shows
-precision holds (≥0.94) all the way down to 40 Hz while recall halves below
-100 Hz (0.33-0.67 vs 0.73 at 100 Hz and 0.83 at 200 Hz): a slow capture makes
-the detector *miss* defects, it does not make it invent them. Withholding those
-findings threw away sound evidence, so ``FLOOR_FS_HZ``..``MIN_FS_HZ`` is now
-degraded-but-reported and only a rate that puts the whole 20-45 Hz shock band
-above Nyquist is unusable.
+Sample rate is graded rather than binary. A seeded sweep (§E6) shows a slow
+capture costs *recall*, not precision: 41-90 Hz scores 0.97-1.00 precision at
+0.33-0.67 recall, against 0.94/0.70 at the nominal 100 Hz and 0.91/0.90 at
+200 Hz — a slow pass misses defects rather than inventing them, and is no more
+false-positive prone than a fast one. Withholding its findings threw away sound
+evidence, so ``FLOOR_FS_HZ``..``MIN_FS_HZ`` is degraded-but-reported and only a
+rate that leaves *nothing* of the shock band below Nyquist is unusable.
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ from imukit.preprocess import G, lowpass
 from .ingest import Recording
 
 MIN_FS_HZ = 100.0
-FLOOR_FS_HZ = 50.0
 WARN_FS_HZ = 150.0
 SHOCK_BAND_HZ = (20.0, 45.0)
+FLOOR_FS_HZ = 2.0 * SHOCK_BAND_HZ[0]  # Nyquist: below this the shock band is gone entirely
 MAX_GPS_ERR_M = 3.0
 WARN_GPS_ERR_M = 5.0
 MIN_DURATION_S = 30.0
@@ -42,9 +42,13 @@ VERDICTS = ("ok", "degraded", "unusable")
 
 
 def _shock_band_covered(fs: float) -> float:
-    """Fraction of the shock band that survives sampling at ``fs`` (Nyquist-limited)."""
+    """Fraction of the shock band that survives sampling at ``fs`` (Nyquist-limited).
+
+    Rounded at the bottom so a rate that only clears ``FLOOR_FS_HZ`` by timestamp
+    noise reads as the zero coverage it physically is.
+    """
     lo, hi = SHOCK_BAND_HZ
-    return float(np.clip((fs / 2.0 - lo) / (hi - lo), 0.0, 1.0))
+    return round(float(np.clip((fs / 2.0 - lo) / (hi - lo), 0.0, 1.0)), 6)
 
 
 def _dc_magnitude(accel: np.ndarray, fs: float) -> float:
@@ -125,18 +129,19 @@ def assess(rec: Recording) -> CaptureQuality:
         route_length_m=None,
     )
 
-    if fs < FLOOR_FS_HZ:
+    if q.shock_band_covered_frac <= 0.0:
         _fail(
             q,
-            f"IMU sampled at {fs:.0f} Hz; below {FLOOR_FS_HZ:.0f} Hz the whole {SHOCK_BAND_HZ[0]:.0f}-"
+            f"IMU sampled at {fs:.0f} Hz; at or below {FLOOR_FS_HZ:.0f} Hz the whole {SHOCK_BAND_HZ[0]:.0f}-"
             f"{SHOCK_BAND_HZ[1]:.0f} Hz shock band is above Nyquist, so there is nothing to detect",
         )
     elif fs < MIN_FS_HZ:
         _warn(
             q,
             f"IMU at {fs:.0f} Hz covers {q.shock_band_covered_frac * 100:.0f}% of the "
-            f"{SHOCK_BAND_HZ[0]:.0f}-{SHOCK_BAND_HZ[1]:.0f} Hz shock band; findings stay precise but "
-            f"about half of them are missed (E5: F1 0.50 at 50 Hz vs 0.80 at 100 Hz)",
+            f"{SHOCK_BAND_HZ[0]:.0f}-{SHOCK_BAND_HZ[1]:.0f} Hz shock band; findings are no less "
+            f"trustworthy than at 100 Hz, but about half of the defects are missed "
+            f"(E6: recall 0.33-0.67 vs 0.70 at 100 Hz)",
         )
     elif fs < WARN_FS_HZ:
         _warn(q, f"IMU at {fs:.0f} Hz is the minimum viable rate; 200 Hz keeps the 20-80 Hz shock band")
