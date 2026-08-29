@@ -84,6 +84,7 @@ export function MapWorkspace() {
    * gesture still counts, so the watch starts without a second tap.
    */
   const handleStart = useCallback(async () => {
+    if (locationPermission.requesting) return;
     if (locationPermission.state === 'granted') {
       runTracker.start();
       return;
@@ -175,6 +176,13 @@ export function MapWorkspace() {
     [voice],
   );
 
+  // A revocation made in browser settings is invisible to a browser without a
+  // queryable geolocation permission, so the watch's own denial is what tells the
+  // consent card its remembered grant is stale.
+  useEffect(() => {
+    if (runTracker.status.permission === 'denied') locationPermission.noteDenied();
+  }, [runTracker.status.permission, locationPermission]);
+
   // Dictation is tied to the run: stopping the run also stops the microphone.
   useEffect(() => {
     if (!running && voiceEnabled) {
@@ -242,6 +250,7 @@ export function MapWorkspace() {
           onToggleFollow={setFollow}
           onStart={() => void handleStart()}
           locationState={locationPermission.state}
+          locationRequesting={locationPermission.requesting}
           onStop={() => void runTracker.stop()}
           voice={{
             enabled: voiceEnabled,

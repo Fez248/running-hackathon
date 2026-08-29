@@ -79,6 +79,13 @@ export interface LocationPermission {
    * remembered denial is re-opened so the user can ask once more.
    */
   recheck: () => Promise<LocationPermissionState>;
+  /**
+   * Records a denial observed elsewhere — the run tracker's `watchPosition` is
+   * the only place a revocation shows up in a browser without a queryable
+   * geolocation permission, and a remembered grant would otherwise keep starting
+   * runs that die on their first callback.
+   */
+  noteDenied: () => void;
 }
 
 export function useLocationPermission(): LocationPermission {
@@ -168,7 +175,19 @@ export function useLocationPermission(): LocationPermission {
     return () => clearInterval(timer);
   }, [pendingCooldown]);
 
+  const noteDenied = useCallback(() => {
+    if (recordRef.current.state === 'denied') return;
+    apply({ type: 'failed', failure: 'denied' });
+    setError(locationFailureMessage('denied'));
+  }, [apply]);
+
+  // One prompt at a time: Start and the consent card can both ask, and two
+  // resolutions would each call `runTracker.start()`, the second discarding the
+  // track the first had already begun.
+  const inFlightRef = useRef<Promise<LocationPermissionState> | null>(null);
+
   const request = useCallback(async (): Promise<LocationPermissionState> => {
+    if (inFlightRef.current) return inFlightRef.current;
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       const next = apply({ type: 'failed', failure: 'unavailable' });
       setError(locationFailureMessage('unavailable'));
@@ -185,7 +204,7 @@ export function useLocationPermission(): LocationPermission {
     setError(null);
     apply({ type: 'requested', at: Date.now() });
     try {
-      return await new Promise<LocationPermissionState>((resolve) => {
+      const attempt = new Promise<LocationPermissionState>((resolve) => {
         navigator.geolocation.getCurrentPosition(
           () => {
             // The position itself is deliberately dropped: this call only
@@ -202,7 +221,10 @@ export function useLocationPermission(): LocationPermission {
           PROBE_OPTIONS,
         );
       });
+      inFlightRef.current = attempt;
+      return await attempt;
     } finally {
+      inFlightRef.current = null;
       setRequesting(false);
     }
   }, [apply]);
@@ -230,5 +252,6 @@ export function useLocationPermission(): LocationPermission {
     observable,
     request,
     recheck,
+    noteDenied,
   };
 }
