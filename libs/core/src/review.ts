@@ -26,6 +26,18 @@ export const REVIEW_CONFIDENCE_FLOOR = 0.5;
 /** Report statuses this feature adds to the existing ACTIVE/RESOLVED/REJECTED. */
 export const PENDING_REVIEW = 'PENDING_REVIEW';
 
+/**
+ * Is this report withheld from anyone without an identity?
+ *
+ * A queued dictation carries a raw transcript the parser could not be trusted
+ * with, and a rejected one carries a parse a human read and threw out. Neither
+ * belongs on the public map, so neither belongs in a public single-report read
+ * either — otherwise a report id is all it takes to walk around the queue.
+ */
+export function withheldFromPublic(status: string): boolean {
+  return status === PENDING_REVIEW || status === 'REJECTED';
+}
+
 /** Does this parse need a human before it reaches the map? */
 export function needsReview(parseConfidence: number): boolean {
   return parseConfidence < REVIEW_CONFIDENCE_FLOOR;

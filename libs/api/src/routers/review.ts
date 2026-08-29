@@ -86,47 +86,52 @@ export const reviewRouter = createTRPCRouter({
    * second does not silently overwrite a correction with an approval.
    */
   decide: protectedProcedure.input(reviewDecisionSchema).mutation(async ({ ctx, input }) => {
-    const report = await ctx.prisma.report.findUnique({ where: { id: input.reportId } });
-    if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
-    if (report.authorId && report.authorId === ctx.user.id) {
-      // Reviewing one's own dictation is not a second opinion, which is the
-      // whole point of the queue.
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'A dictated report has to be reviewed by someone other than its author.',
-      });
-    }
-    if (report.status !== PENDING_REVIEW) {
-      throw new TRPCError({
-        code: 'CONFLICT',
-        message: 'This report has already been reviewed.',
-      });
-    }
+    // The read, the confidence it implies and the write happen in one
+    // transaction: a vote committing in between would otherwise be counted by
+    // `report.vote` and then have its tally's confidence overwritten with the
+    // score this decision read before it.
+    const decided = await ctx.prisma.$transaction(async (tx) => {
+      const report = await tx.report.findUnique({ where: { id: input.reportId } });
+      if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (report.authorId && report.authorId === ctx.user.id) {
+        // Reviewing one's own dictation is not a second opinion, which is the
+        // whole point of the queue.
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'A dictated report has to be reviewed by someone other than its author.',
+        });
+      }
 
-    const fields = reviewedFields(
-      input,
-      confidence({
-        agreeCount: report.agreeCount,
-        disagreeCount: report.disagreeCount,
-        accuracyM: report.accuracyM,
-      }),
-    );
+      const fields = reviewedFields(
+        input,
+        confidence({
+          agreeCount: report.agreeCount,
+          disagreeCount: report.disagreeCount,
+          accuracyM: report.accuracyM,
+        }),
+      );
 
-    const updated = await ctx.prisma.report.updateMany({
-      where: { id: report.id, status: PENDING_REVIEW },
-      data: {
-        ...fields,
-        reviewedAt: new Date(),
-        ...(input.action === 'reject' ? { reviewNote: input.reason ?? null } : {}),
-      },
+      // Still conditional on the status, so of two reviewers only the first
+      // decides and the second gets CONFLICT.
+      const updated = await tx.report.updateMany({
+        where: { id: report.id, status: PENDING_REVIEW },
+        data: {
+          ...fields,
+          reviewedAt: new Date(),
+          ...(input.action === 'reject' ? { reviewNote: input.reason ?? null } : {}),
+        },
+      });
+
+      return updated.count ? { id: report.id, status: fields.status } : null;
     });
-    if (!updated.count) {
+
+    if (!decided) {
       throw new TRPCError({
         code: 'CONFLICT',
         message: 'This report has already been reviewed.',
       });
     }
 
-    return { id: report.id, status: fields.status };
+    return decided;
   }),
 });
