@@ -33,6 +33,31 @@ export const profileSchema = z.enum(PROFILES);
 export const latitudeSchema = z.number().min(-90).max(90);
 export const longitudeSchema = z.number().min(-180).max(180);
 
+/**
+ * Prefix reserved for scan-derived idempotency keys.
+ *
+ * `Report.clientReportId` is a single namespace shared by manual, dictated,
+ * offline and detector writes. A key a client could also send would let a
+ * generic report squat on a finding's key, and the scan would then adopt that
+ * unrelated row instead of recording its own finding — so the detector's keys
+ * live in a prefix the client-facing schemas refuse.
+ */
+export const SENSOR_REPORT_ID_PREFIX = 'sensor:';
+
+/** Is this idempotency key one only the detector path may write? */
+export function reservedClientReportId(clientReportId: string): boolean {
+  return clientReportId.startsWith(SENSOR_REPORT_ID_PREFIX);
+}
+
+/** Client-supplied idempotency key, outside the detector's namespace. */
+export const clientReportIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine((value) => !reservedClientReportId(value), {
+    message: `clientReportId must not start with "${SENSOR_REPORT_ID_PREFIX}"`,
+  });
+
 export const coordinateSchema = z.object({
   lat: latitudeSchema,
   lng: longitudeSchema,
@@ -59,7 +84,7 @@ export const createReportSchema = z.object({
   transcript: z.string().max(500).optional(),
   /** Run this report was captured during. */
   traceId: z.string().optional(),
-  clientReportId: z.string().min(1).max(64).optional(),
+  clientReportId: clientReportIdSchema.optional(),
 });
 export type CreateReportInput = z.infer<typeof createReportSchema>;
 

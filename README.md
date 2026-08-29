@@ -85,11 +85,16 @@ Two rules the seam preserves:
   recording is auditable instead of vanishing, but the quality gate's refusal to trust the
   recording is not laundered into map data.
 - **Re-uploading the same file changes nothing.** `clientScanId` defaults to a content hash
-  of the scan and each report is keyed `<clientScanId>:<findingIndex>`, so ingest is
+  of the scan and each report is keyed `sensor:<clientScanId>:<findingIndex>`, so ingest is
   idempotent; a re-run whose findings or certificate differ hashes differently and is a
   different scan, while a re-run that reproduces them byte for byte is the same claim.
   Concurrent uploads of one scan converge on the same scan and reports, and a scan and its
   reports are written in one transaction, so a half-imported scan cannot block a retry.
+- **A finding's key is the detector's alone.** `clientReportId` is one namespace shared with
+  manual, dictated and offline writes, so the `sensor:` prefix is reserved: the client-facing
+  schemas refuse it, and ingest refuses a key it finds already taken rather than adopting an
+  unrelated report as if it were the finding — the transaction rolls back, so no scan is left
+  claiming an import it never made.
 - **The recording is named, not located.** Only the recording's bare filename travels with
   the payload; the scan history is as public as the map, so local paths and usernames stay
   on the machine that ran the detector.

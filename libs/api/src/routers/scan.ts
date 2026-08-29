@@ -79,12 +79,24 @@ export const scanRouter = createTRPCRouter({
 
         const reportIds: string[] = [];
         for (const draft of drafts) {
-          // Upsert for the same reason report.create does: a retried upload
-          // must deduplicate instead of hitting the unique index.
-          const row = await tx.report.upsert({
+          // A key in the detector's namespace can only already exist if some
+          // other row took it, and adopting that row would attach the scan to a
+          // report that is not its finding. Refuse instead: the transaction
+          // rolls back, so nothing is left claiming an import that never
+          // happened and the upload stays retriable.
+          const squatter = await tx.report.findUnique({
             where: { clientReportId: draft.clientReportId },
-            update: {},
-            create: {
+            select: { id: true },
+          });
+          if (squatter) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: `Report id ${draft.clientReportId} is already taken; re-upload this scan under a different clientScanId.`,
+            });
+          }
+
+          const row = await tx.report.create({
+            data: {
               lat: draft.lat,
               lng: draft.lng,
               gridKey: gridKey({ lat: draft.lat, lng: draft.lng }),

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { createReportSchema, reservedClientReportId } from './obstacles';
+import { voiceReportSchema } from './voice';
 import {
   scanIngestSchema,
   sensorFindingToReport,
@@ -82,6 +84,19 @@ describe('scanIngestSchema', () => {
     expect(scan({ source: '/' }).source).toBe('recording');
   });
 
+  it('rejects two findings sharing one index', () => {
+    expect(
+      scanIngestSchema.safeParse({
+        source: 'demo_pass',
+        format: 'csv',
+        quality: QUALITY,
+        cadenceSpm: 100,
+        findings: [FINDING, { ...FINDING, peakM: 60 }],
+        clientScanId: 'scan-dup',
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects a finding confidence outside 0..1', () => {
     expect(
       scanIngestSchema.safeParse({
@@ -137,7 +152,10 @@ describe('sensorFindingToReport', () => {
 describe('sensorReportsForScan', () => {
   it('creates one report per finding', () => {
     const reports = sensorReportsForScan(scan({ findings: [FINDING, { ...FINDING, index: 1 }] }));
-    expect(reports.map((report) => report.clientReportId)).toEqual(['scan-1:0', 'scan-1:1']);
+    expect(reports.map((report) => report.clientReportId)).toEqual([
+      'sensor:scan-1:0',
+      'sensor:scan-1:1',
+    ]);
   });
 
   it('creates nothing for an unusable capture, however many findings it claims', () => {
@@ -150,5 +168,45 @@ describe('sensorReportsForScan', () => {
 
   it('accepts a degraded capture', () => {
     expect(sensorReportsForScan(scan({ quality: { ...QUALITY, verdict: 'degraded' } }))).toHaveLength(1);
+  });
+});
+
+describe('the detector id namespace', () => {
+  const derived = sensorReportClientId('scan-1', 0);
+
+  it('keeps scan-derived keys inside a namespace of their own', () => {
+    expect(reservedClientReportId(derived)).toBe(true);
+    expect(reservedClientReportId('offline-42')).toBe(false);
+  });
+
+  it('refuses a manual report claiming a scan-derived key', () => {
+    const claim = createReportSchema.safeParse({
+      lat: 52.37,
+      lng: 4.9,
+      kind: 'CURB',
+      clientReportId: derived,
+    });
+    expect(claim.success).toBe(false);
+  });
+
+  it('refuses a dictated report claiming a scan-derived key', () => {
+    const claim = voiceReportSchema.safeParse({
+      transcript: 'broken pavement here',
+      lat: 52.37,
+      lng: 4.9,
+      clientReportId: derived,
+    });
+    expect(claim.success).toBe(false);
+  });
+
+  it('still accepts a client key of its own', () => {
+    expect(
+      createReportSchema.safeParse({
+        lat: 52.37,
+        lng: 4.9,
+        kind: 'CURB',
+        clientReportId: 'offline-42',
+      }).success,
+    ).toBe(true);
   });
 });
