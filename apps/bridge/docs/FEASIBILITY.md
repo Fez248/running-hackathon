@@ -118,6 +118,36 @@ Two hard requirements fall out of this: **≥100 Hz sampling** and **GPS error
 smeared across bins and localization collapses entirely even though the anomaly
 is still *visible* in the residual.
 
+### E6 — what a slow capture actually costs (precision vs recall, 10 seeds)
+| sample rate | precision | recall | false positives (30 events) |
+| --- | --- | --- | --- |
+| 35 Hz | 0.90 | 0.30 | 0 |
+| 40 Hz | 0.95 | 0.33 | 1 |
+| 41 Hz | 1.00 | 0.33 | 0 |
+| 45 Hz | 1.00 | 0.37 | 0 |
+| 50 Hz | 1.00 | 0.33 | 0 |
+| 60 Hz | 1.00 | 0.67 | 0 |
+| 75 Hz | 1.00 | 0.33 | 0 |
+| 90 Hz | 0.97 | 0.67 | 1 |
+| 99 Hz | 0.93 | 0.70 | 2 |
+| 100 Hz | 0.94 | 0.70 | 2 |
+| 200 Hz | 0.91 | 0.90 | 4 |
+
+E5's F1 collapse below 100 Hz is **entirely a recall collapse**: whatever a slow
+capture does report is at least as trustworthy as at 200 Hz — precision *rises*
+as the rate falls, because a detector that sees less also fires less — it just
+misses defects, since each halving of the rate removes more of the 20-45 Hz
+shock band. Note in particular that the false positives are not a low-rate
+effect: 99 Hz and the accepted 100 Hz behave identically (0.93 vs 0.94), and the
+worst precision at either end belongs to 200 Hz.
+
+The capture gate therefore grades sample rate instead of rejecting on it —
+sub-100 Hz is `degraded` and reported with a "half the defects are missed" note,
+and a pass is unusable only where the physics says nothing survives: below
+2 x 20 = 40 Hz the entire shock band is above Nyquist. 41 Hz is kept because it
+measurably behaves like 50 Hz, not like 35 Hz. (The non-monotonicity at 60 vs
+75 Hz is a one-event scenario artifact on a 3-anomaly route, as in E5.)
+
 ## 4. Assumptions
 
 1. The baseline surface dominates the route (single-pass mode only). A route that

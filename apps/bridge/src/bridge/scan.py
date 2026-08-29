@@ -22,7 +22,7 @@ from imukit.geo import position_at_distance
 from .detect import detect_single_pass
 from .ingest import Recording
 from .pipeline import ProcessedPass, process_pass
-from .quality import CaptureQuality, assess
+from .quality import MIN_FS_HZ, CaptureQuality, assess
 
 # What the two detector polarities mean on a pavement, in the vocabulary of the
 # Sidewalk Map report model (libs/core: ROUGH_SURFACE).
@@ -94,6 +94,13 @@ def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, 
                 notes=notes,
             ),
             None,
+        )
+
+    if quality.rate_limited:
+        notes.append(
+            f"sampled below {MIN_FS_HZ:.0f} Hz: reported findings are as reliable as a {MIN_FS_HZ:.0f} Hz "
+            "pass's, but roughly half the defects are missed — an empty result is not evidence of a "
+            "sound surface"
         )
 
     pp = process_pass(rec.trace, rec.gps)

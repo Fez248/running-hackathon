@@ -8,8 +8,8 @@ from imukit.geo import cumulative_distance, position_at_distance
 
 from bridge.experiments import ROUTE_ANOMALIES
 from bridge.ingest import load_recording, write_export_dir
-from bridge.quality import assess
-from bridge.scan import format_report, scan_recording, to_csv, to_geojson
+from bridge.quality import FLOOR_FS_HZ, assess
+from bridge.scan import CONFIDENCE_BY_VERDICT, format_report, scan_recording, to_csv, to_geojson
 from bridge.synth import SurfaceScenario, simulate_pass
 
 SENSORLOGGER_ACCEL = """time,seconds_elapsed,z,y,x
@@ -116,8 +116,60 @@ def test_low_sample_rate_and_bad_gps_fail_the_gate(tmp_path):
     assert pp is None
     assert result.findings == []
     assert result.quality.verdict == "unusable"
-    assert any("100 Hz" in p for p in result.quality.problems)
     assert any("GPS accuracy" in p for p in result.quality.problems)
+    # 50 Hz on its own no longer withholds anything, it only downgrades.
+    assert any("shock band" in w for w in result.quality.warnings)
+
+
+def test_sub_100hz_capture_is_degraded_but_still_reports_findings(tmp_path):
+    trace, gps, _ = _short_pass(fs=60.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    result, pp = scan_recording(load_recording(tmp_path / "rec"))
+    assert pp is not None
+    assert result.quality.verdict == "degraded"
+    assert result.quality.rate_limited
+    assert result.quality.problems == []
+    assert result.findings, "a 60 Hz capture still carries usable evidence"
+    assert all(f.confidence <= CONFIDENCE_BY_VERDICT["degraded"] for f in result.findings)
+    assert any("shock band" in w for w in result.quality.warnings)
+    assert any("not evidence of a sound surface" in n for n in result.notes)
+
+
+@pytest.mark.parametrize("fs", [35.0, FLOOR_FS_HZ])
+def test_sample_rate_at_or_below_the_nyquist_floor_is_unusable(tmp_path, fs):
+    trace, gps, _ = _short_pass(fs=fs)
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    result, pp = scan_recording(load_recording(tmp_path / "rec"))
+    assert pp is None
+    assert result.findings == []
+    assert result.quality.verdict == "unusable"
+    assert not result.quality.rate_limited
+    assert result.quality.shock_band_covered_frac == 0.0
+    assert any("Nyquist" in p for p in result.quality.problems)
+
+
+def test_just_above_the_floor_is_graded_not_refused(tmp_path):
+    """The floor is the Nyquist condition, not a round number: 41 Hz still sees
+    the bottom of the shock band and E6 scores it as precisely as 100 Hz."""
+    trace, gps, _ = _short_pass(fs=FLOOR_FS_HZ + 1.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    q = assess(load_recording(tmp_path / "rec"))
+    assert q.verdict == "degraded"
+    assert q.rate_limited
+    assert 0.0 < q.shock_band_covered_frac < 0.1
+
+
+def test_full_rate_capture_keeps_the_unqualified_verdict(tmp_path):
+    trace, gps, _ = _short_pass(fs=200.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    q = assess(load_recording(tmp_path / "rec"))
+    assert q.verdict == "ok"
+    assert not q.rate_limited
+    assert q.shock_band_covered_frac == 1.0
 
 
 def test_scan_of_a_good_recording_finds_and_locates_anomalies(tmp_path):

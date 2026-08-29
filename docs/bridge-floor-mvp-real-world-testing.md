@@ -108,7 +108,7 @@ Confusing filenames do not help you here: the gate looks at the physics, not the
 
 | Parameter | Requirement | Source |
 | --- | --- | --- |
-| IMU sample rate | ≥ 100 Hz hard, 200 Hz recommended | `MIN_FS_HZ`, `WARN_FS_HZ = 150` |
+| IMU sample rate | ≥ 100 Hz target, 200 Hz recommended; 41-100 Hz scanned as `degraded`, ≤ 40 Hz rejected | `MIN_FS_HZ`, `FLOOR_FS_HZ = 40`, `WARN_FS_HZ = 150` |
 | GPS | required, with an accuracy column; ≥ 2 fixes; 1 Hz is enough | `assess()` fails without a track |
 | GPS median accuracy | ≤ 3 m target, > 5 m rejected | `MAX_GPS_ERR_M`, `WARN_GPS_ERR_M` |
 | Pass duration | ≥ 30 s | `MIN_DURATION_S` |
@@ -226,7 +226,7 @@ Run before any detection; on `unusable` the findings are **withheld** and the CL
 
 | Check | Rejected (`unusable`, exit 1) | Warned (`degraded`, still scanned) |
 | --- | --- | --- |
-| IMU sample rate | `< 100 Hz` | `< 150 Hz` |
+| IMU sample rate | `<= 40 Hz` (whole 20-45 Hz shock band above Nyquist) | `< 150 Hz`; `< 100 Hz` additionally warns that ~half the defects are missed (E6) |
 | Pass duration | `< 30 s` | — |
 | Gravity present | median low-passed `\|a\|` outside `0.5 g … 2.0 g` | — |
 | GPS track | missing, or `< 2` fixes | — |
@@ -242,15 +242,19 @@ the sample-rate/GPS-accuracy warning, as analysable; anything else means re-reco
 What a rejection looks like (reproduce it with a deliberately bad demo capture):
 
 ```bash
-python -m bridge.cli scan --demo --demo-fs 50 --sample-dir samples/bad_pass; echo "exit=$?"
+python -m bridge.cli scan --demo --demo-fs 35 --sample-dir samples/bad_pass; echo "exit=$?"
 ```
 
 ```
 verdict       UNUSABLE
-  ! IMU sampled at 50 Hz; ≥100 Hz is required (E5: F1 0.50 at 50 Hz)
+  ! IMU sampled at 35 Hz; at or below 40 Hz the whole 20-45 Hz shock band is above Nyquist, so there is nothing to detect
   note: capture failed the quality gate; findings are withheld, fix the capture first
 exit=1
 ```
+
+A 50 Hz pass, by contrast, is scanned and reported as `degraded`: E6 shows a slow capture
+loses recall rather than precision, so its findings are kept — with a note that an *empty*
+result from such a pass is not evidence of a sound surface.
 
 Same shape for a missing GPS track — scanning the accelerometer CSV alone is rejected:
 
@@ -390,7 +394,7 @@ until that section is filled in with real recordings, every number in this repos
 | `no Accelerometer.csv / TotalAcceleration.csv found` | export layout not recognised by stem | rename to `TotalAcceleration.csv` / `Accelerometer.csv`, or pass the CSV directly with `--gps` |
 | `missing time or x/y/z acceleration columns; found [...]` | headers outside the alias list | rename the columns to `t,ax,ay,az` (the message lists what was parsed) |
 | `DC \|a\| is 0.0x m/s², not ~9.8: gravity removed` | linear-/user-acceleration stream | re-record with Total Acceleration / "Acceleration with g" |
-| `IMU sampled at NN Hz; ≥100 Hz is required` | logger default rate too low | set 200 Hz in the app; on Android some apps cap per-sensor rate — check the export, not the UI |
+| `IMU sampled at NN Hz; at or below 40 Hz ...` | logger default rate too low | set 200 Hz in the app; on Android some apps cap per-sensor rate — check the export, not the UI |
 | `no usable GPS track` | GPS not enabled, or GPS file not exported/found | enable Location in the logger, export `Location.csv`, or pass `--gps` |
 | `median GPS accuracy N m` rejection | urban canyon / cold GPS start | wait ~1 min outdoors before starting, pick an open route, re-record |
 | `pass is NN s; ... needs ≥30 s` | pass too short | walk a longer stretch (200 m+) |
