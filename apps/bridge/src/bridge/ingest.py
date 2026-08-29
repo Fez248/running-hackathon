@@ -153,6 +153,9 @@ def _gps_from_table(cols: dict[str, np.ndarray], t0: float) -> GpsTrack | None:
     if t_raw is None or lat is None or lon is None:
         return None
     acc = _pick(cols, ACC_KEYS)
+    if acc is not None and not np.any(np.isfinite(acc)):
+        # A column of blanks is an absent accuracy report, not an invalid fix.
+        acc = None
     t = _seconds(t_raw)
     if acc is None:
         t, lat, lon = _clean(t, lat, lon)
