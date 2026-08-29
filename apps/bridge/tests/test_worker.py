@@ -19,6 +19,7 @@ from bridge.synth import SurfaceScenario, simulate_pass
 from bridge.worker import (
     UploadedFile,
     materialise,
+    parse_field,
     parse_multipart,
     safe_relative_name,
     scan_upload,
@@ -27,7 +28,7 @@ from bridge.worker import (
 BOUNDARY = "----bridgeboundary"
 
 
-def multipart(files: list[tuple[str, bytes]]) -> tuple[str, bytes]:
+def multipart(files: list[tuple[str, bytes]], recording: str | None = None) -> tuple[str, bytes]:
     """A multipart body shaped the way the browser's FormData sends one."""
     chunks: list[bytes] = []
     for name, content in files:
@@ -36,6 +37,11 @@ def multipart(files: list[tuple[str, bytes]]) -> tuple[str, bytes]:
             f"Content-Type: application/octet-stream\r\n\r\n".encode()
         )
         chunks.append(content + b"\r\n")
+    if recording is not None:
+        chunks.append(
+            f'--{BOUNDARY}\r\nContent-Disposition: form-data; name="recording"\r\n\r\n'
+            f"{recording}\r\n".encode()
+        )
     chunks.append(f"--{BOUNDARY}--\r\n".encode())
     return f"multipart/form-data; boundary={BOUNDARY}", b"".join(chunks)
 
@@ -96,6 +102,40 @@ def test_materialise_points_at_the_exported_directory(tmp_path):
 
     assert target == root / "walk"
     assert (target / "Accelerometer.csv").read_bytes() == b"a\n"
+
+
+def test_materialise_names_a_pathless_upload_after_the_recording(tmp_path):
+    """A browser that sends no directory component must not make the scan random."""
+    files = [
+        UploadedFile(name="Accelerometer.csv", content=b"a\n"),
+        UploadedFile(name="Location.csv", content=b"b\n"),
+    ]
+    root = tmp_path / "root"
+    root.mkdir()
+    target = materialise(files, root, recording="walk")
+
+    assert target == root / "walk"
+    assert (target / "Accelerometer.csv").read_bytes() == b"a\n"
+
+
+def test_scan_upload_of_a_pathless_export_is_the_same_scan_every_time(tmp_path):
+    directory = export_dir(tmp_path)
+    flat = [
+        UploadedFile(name=path.name, content=path.read_bytes())
+        for path in sorted(directory.iterdir())
+    ]
+
+    first = scan_upload(flat, recording="walk")
+    second = scan_upload(flat, recording="walk")
+
+    assert first["source"] == second["source"] == "walk"
+    assert first["clientScanId"] == second["clientScanId"]
+
+
+def test_parse_field_reads_the_recording_label(tmp_path):
+    content_type, body = multipart([("Accelerometer.csv", b"a\n")], recording="walk")
+    assert parse_field(content_type, body, "recording") == "walk"
+    assert parse_field(content_type, body, "missing") is None
 
 
 def test_materialise_points_at_a_single_archive(tmp_path):

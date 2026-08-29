@@ -47,21 +47,23 @@ class UploadedFile:
     content: bytes
 
 
+def parse_field(content_type: str, body: bytes, name: str) -> str | None:
+    """A named text field of a multipart body, if it carries one."""
+    for part in _parts(content_type, body):
+        if part.get_param("name", header="content-disposition") != name:
+            continue
+        if part.get_filename():
+            continue
+        payload = part.get_payload(decode=True)
+        if payload:
+            return payload.decode("utf-8", "replace").strip() or None
+    return None
+
+
 def parse_multipart(content_type: str, body: bytes) -> list[UploadedFile]:
-    """The ``file`` parts of a multipart body, in order.
-
-    ``cgi`` is gone from the standard library, so the body is handed to the
-    email parser, which is what is left that understands MIME multipart.
-    """
-    if "multipart/form-data" not in content_type.lower():
-        raise ValueError("expected multipart/form-data")
-    headers = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()
-    message = email.parser.BytesParser(policy=email.policy.default).parsebytes(headers + body)
-    if not message.is_multipart():
-        raise ValueError("body is not multipart")
-
+    """The ``file`` parts of a multipart body, in order."""
     files: list[UploadedFile] = []
-    for part in message.iter_parts():
+    for part in _parts(content_type, body):
         if part.get_param("name", header="content-disposition") != "file":
             continue
         filename = part.get_filename() or "recording.bin"
@@ -74,6 +76,21 @@ def parse_multipart(content_type: str, body: bytes) -> list[UploadedFile]:
     return files
 
 
+def _parts(content_type: str, body: bytes):
+    """The parts of a multipart body.
+
+    ``cgi`` is gone from the standard library, so the body is handed to the
+    email parser, which is what is left that understands MIME multipart.
+    """
+    if "multipart/form-data" not in content_type.lower():
+        raise ValueError("expected multipart/form-data")
+    headers = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()
+    message = email.parser.BytesParser(policy=email.policy.default).parsebytes(headers + body)
+    if not message.is_multipart():
+        raise ValueError("body is not multipart")
+    return message.iter_parts()
+
+
 def safe_relative_name(filename: str) -> str:
     """A relative path an upload cannot use to escape the scan directory."""
     parts = [
@@ -84,13 +101,23 @@ def safe_relative_name(filename: str) -> str:
     return "/".join(parts) or "recording.bin"
 
 
-def materialise(files: list[UploadedFile], root: Path) -> Path:
+def materialise(files: list[UploadedFile], root: Path, recording: str | None = None) -> Path:
     """Write the upload under ``root`` and return what to scan.
 
     A single ``.zip`` is scanned as the archive it is; anything else is a
     directory export, and its own top-level folder (which the browser includes
     in every relative path) is what the CLI would have been pointed at.
+
+    A browser that sends no directory component gets one: the scan target's name
+    ends up in the payload's ``source`` and in the content-addressed scan id, so
+    scanning under this request's random temporary directory would make every
+    re-upload of one recording a different scan.
     """
+    flat = all("/" not in file.name for file in files)
+    prefix = safe_relative_name(recording or "") if recording else ""
+    if flat and len(files) > 1 and prefix:
+        files = [UploadedFile(name=f"{prefix}/{file.name}", content=file.content) for file in files]
+
     for file in files:
         target = root / file.name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -105,12 +132,14 @@ def materialise(files: list[UploadedFile], root: Path) -> Path:
     return root
 
 
-def scan_upload(files: list[UploadedFile], threshold: float = 3.0) -> dict:
+def scan_upload(
+    files: list[UploadedFile], threshold: float = 3.0, recording: str | None = None
+) -> dict:
     """Scan an uploaded recording and return the map payload for it."""
     with tempfile.TemporaryDirectory(prefix="bridge-worker-") as tmp:
-        target = materialise(files, Path(tmp))
-        recording = load_recording(target)
-        result, _pass = scan_recording(recording, threshold=threshold)
+        target = materialise(files, Path(tmp), recording)
+        loaded = load_recording(target)
+        result, _pass = scan_recording(loaded, threshold=threshold)
         return to_map_payload(result)
 
 
@@ -156,7 +185,8 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            payload = scan_upload(files, threshold=self.threshold)
+            recording = parse_field(self.headers.get("content-type", ""), body, "recording")
+            payload = scan_upload(files, threshold=self.threshold, recording=recording)
         except Exception as error:  # a bad recording must not kill the worker
             self._json(422, {"error": "scan-failed", "message": str(error)})
             return

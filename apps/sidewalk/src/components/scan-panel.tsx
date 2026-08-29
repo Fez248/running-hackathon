@@ -66,6 +66,10 @@ export function ScanPanel() {
 
   const [worker, setWorker] = useState<WorkerStatus | null>(null);
   const [recording, setRecording] = useState<string | null>(null);
+  // Held so a recording picked while the capability probe is still in flight is
+  // scanned once the answer arrives, rather than being remembered as a label
+  // for files nobody kept.
+  const [pending, setPending] = useState<File[] | null>(null);
   const [rawBusy, setRawBusy] = useState(false);
   const [rawError, setRawError] = useState<string | null>(null);
   const [rawOutcome, setRawOutcome] = useState<RawScanOutcome | null>(null);
@@ -162,6 +166,17 @@ export function ScanPanel() {
         setRawOutcome(body);
         return;
       }
+      // The worker is configured but did not deliver, so the fallback command
+      // is what is left: show it rather than promising it.
+      setWorker((current) =>
+        current
+          ? {
+              ...current,
+              available: false,
+              reason: 'This deployment has a scan worker, but it could not scan that recording.',
+            }
+          : current,
+      );
       setRawError(
         body?.reason ??
           `The scan worker could not scan that recording (HTTP ${response.status}). Run the ` +
@@ -184,8 +199,21 @@ export function ScanPanel() {
     setRecording(recordingLabelForFiles(files.map(toDescriptor)));
     setRawOutcome(null);
     setRawError(null);
-    if (worker?.available) void scanRawFiles(files);
+    if (worker === null) {
+      setPending(files);
+      return;
+    }
+    if (worker.available) void scanRawFiles(files);
   };
+
+  // A recording picked before the answer came back is scanned as soon as it does.
+  useEffect(() => {
+    if (!pending || !worker?.available) return;
+    setPending(null);
+    void scanRawFiles(pending);
+    // scanRawFiles only reads state setters, so it does not belong in the deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, worker?.available]);
 
   const quality = payload?.quality;
   const result = ingest.data;
@@ -249,11 +277,11 @@ export function ScanPanel() {
         </p>
       ) : null}
 
-      {recording && !worker?.available ? (
+      {recording && worker !== null && !worker.available ? (
         <div className="scan-fallback">
           <p className="muted">
-            Nothing was scanned. Run this where the recording is, then upload the{' '}
-            <code>scan.json</code> it writes:
+            Nothing was scanned. Run this from the repository root — give the recording&apos;s full
+            path if it is not there — then upload the <code>scan.json</code> it writes:
           </p>
           <pre className="scan-command">
             <code>{command}</code>

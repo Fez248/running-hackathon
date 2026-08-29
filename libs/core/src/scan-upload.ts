@@ -44,12 +44,17 @@ export interface ScanCliCommandOptions {
 
 /**
  * The command that turns a recording into an uploadable payload. This is the
- * fallback path, so it is written as the user will actually run it: from
- * `apps/bridge`, under `uv`, which is how this repository runs its Python.
+ * fallback path, so it is written as the user will actually run it: under `uv`,
+ * which is how this repository runs its Python.
+ *
+ * It deliberately does not `cd` into `apps/bridge` — `--project` puts the
+ * command in the bridge's environment without moving the directory the
+ * recording path is resolved from, since the browser only tells us the file's
+ * bare name and a recording usually sits somewhere else entirely.
  */
 export function scanCliCommand({ recording, out = 'scan.json' }: ScanCliCommandOptions): string {
   const target = shellQuote(recording || 'recording.zip');
-  return `cd apps/bridge && uv run python -m bridge.cli scan ${target} --format map --out ${shellQuote(out)}`;
+  return `uv run --project apps/bridge python -m bridge.cli scan ${target} --format map --out ${shellQuote(out)}`;
 }
 
 /**

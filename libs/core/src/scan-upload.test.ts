@@ -31,13 +31,17 @@ describe('shellQuote', () => {
 describe('scanCliCommand', () => {
   it('fills in the picked recording and runs the repository way', () => {
     expect(scanCliCommand({ recording: 'walk.zip' })).toBe(
-      'cd apps/bridge && uv run python -m bridge.cli scan walk.zip --format map --out scan.json',
+      'uv run --project apps/bridge python -m bridge.cli scan walk.zip --format map --out scan.json',
     );
+  });
+
+  it('does not change directory, so the recording path is resolved where it was typed', () => {
+    expect(scanCliCommand({ recording: 'walk.zip' })).not.toContain('cd ');
   });
 
   it('quotes an exported name with spaces so the command is runnable as printed', () => {
     expect(scanCliCommand({ recording: '2026-08-29 14-05-11', out: 'out file.json' })).toBe(
-      "cd apps/bridge && uv run python -m bridge.cli scan '2026-08-29 14-05-11' " +
+      "uv run --project apps/bridge python -m bridge.cli scan '2026-08-29 14-05-11' " +
         "--format map --out 'out file.json'",
     );
   });
