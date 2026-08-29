@@ -102,8 +102,9 @@ export const reportRouter = createTRPCRouter({
         lat: input.lat,
         lng: input.lng,
         gridKey: gridKey({ lat: input.lat, lng: input.lng }),
-        kind: input.kind ?? parsed.kind,
-        passability: input.passability ?? parsed.passability,
+        // Server parse wins: a stored voice report must match its transcript.
+        kind: parsed.kind,
+        passability: parsed.passability,
         heightCm: parsed.heightCm ?? null,
         widthCm: parsed.widthCm ?? null,
         note: parsed.note,

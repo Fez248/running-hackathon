@@ -14,7 +14,7 @@ export const FOG_CELL_SIZE_DEG = 0.00025;
 /** Metres per degree of latitude, good enough for cell-sized maths. */
 const METERS_PER_DEG_LAT = 111_320;
 
-/** Approximate side length of a fog cell in metres, at the equator. */
+/** Height of a fog cell in metres (constant: latitude degrees do not converge). */
 export const FOG_CELL_SIZE_M = FOG_CELL_SIZE_DEG * METERS_PER_DEG_LAT;
 
 /** Default radius around a GPS fix that gets revealed (a street's width). */
@@ -106,7 +106,16 @@ export function fogCellsAlongPath(
   return [...keys];
 }
 
+/**
+ * Area of one fog cell in m². Cells are square in degrees, not in metres:
+ * meridians converge, so a Berlin cell is ~39% narrower than an equatorial one.
+ */
+export function fogCellAreaM2(lat: number): number {
+  const widthM = FOG_CELL_SIZE_M * Math.cos((lat * Math.PI) / 180);
+  return FOG_CELL_SIZE_M * widthM;
+}
+
 /** Cleared area in m², used for the "explored" stat. */
-export function fogClearedAreaM2(cellCount: number): number {
-  return cellCount * FOG_CELL_SIZE_M * FOG_CELL_SIZE_M;
+export function fogClearedAreaM2(cellLats: readonly number[]): number {
+  return cellLats.reduce((total, lat) => total + fogCellAreaM2(lat), 0);
 }

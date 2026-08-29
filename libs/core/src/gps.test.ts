@@ -47,6 +47,24 @@ describe('createGpsFilter', () => {
     expect(filter.trackDistanceM).toBeLessThan(60);
   });
 
+  it('keeps accepting steady movement on coarse fixes', () => {
+    const filter = createGpsFilter();
+    // 5 m/s at 25 m accuracy: the smoothed position lags ~19 m behind, so
+    // judging speed against it would report a teleport on every fix.
+    const stepDeg = 0.00009;
+    filter.push({ ...START, accuracyM: 25 });
+    for (let i = 1; i <= 20; i += 1) {
+      expect(
+        filter.push({
+          ...START,
+          accuracyM: 25,
+          lat: START.lat + i * stepDeg,
+          timestamp: 1_000 + i * 2_000,
+        }),
+      ).toMatchObject({ accepted: true });
+    }
+  });
+
   it('resets cleanly between runs', () => {
     const filter = createGpsFilter();
     filter.push(START);

@@ -7,6 +7,7 @@ import {
   fogCellKey,
   fogCellsAlongPath,
   fogCellsAround,
+  fogCellAreaM2,
   fogClearedAreaM2,
 } from './fog';
 import { distanceMeters } from './geo';
@@ -82,7 +83,14 @@ describe('fogCellsAlongPath', () => {
 });
 
 describe('fogClearedAreaM2', () => {
-  it('scales linearly with cell count', () => {
-    expect(fogClearedAreaM2(4)).toBeCloseTo(fogClearedAreaM2(1) * 4);
+  it('scales linearly with cell count at one latitude', () => {
+    const lats = [CENTER.lat, CENTER.lat, CENTER.lat, CENTER.lat];
+    expect(fogClearedAreaM2(lats)).toBeCloseTo(fogClearedAreaM2([CENTER.lat]) * 4);
+  });
+
+  it('shrinks with latitude as meridians converge', () => {
+    // cos(52.52°) ≈ 0.608, so a Berlin cell is far smaller than an equatorial one.
+    expect(fogCellAreaM2(CENTER.lat)).toBeCloseTo(fogCellAreaM2(0) * Math.cos((CENTER.lat * Math.PI) / 180), 3);
+    expect(fogCellAreaM2(60)).toBeLessThan(fogCellAreaM2(CENTER.lat));
   });
 });

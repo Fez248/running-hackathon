@@ -155,9 +155,6 @@ export const voiceReportSchema = z.object({
   accuracyM: z.number().min(0).max(500).optional(),
   /** Speech engine confidence, 0..1. */
   recognitionConfidence: z.number().min(0).max(1).optional(),
-  /** Client-side parse; the server re-parses and wins on disagreement. */
-  kind: obstacleKindSchema.optional(),
-  passability: passabilitySchema.optional(),
   capturedByProfile: profileSchema.optional(),
   traceId: z.string().optional(),
   clientReportId: z.string().min(1).max(64).optional(),

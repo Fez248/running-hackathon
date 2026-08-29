@@ -5,6 +5,7 @@ import {
   fogCellBounds,
   fogCellCenter,
   fogCellIndexFromKey,
+  fogCellAreaM2,
   fogCellsAlongPath,
   fogClearedAreaM2,
 } from '@sidewalk/core';
@@ -100,13 +101,19 @@ export const coverageRouter = createTRPCRouter({
       revealed: keys.length,
       newlyRevealed: newKeys.length,
       newKeys,
-      newAreaM2: fogClearedAreaM2(newKeys.length),
+      newAreaM2: fogClearedAreaM2(created.map((cell) => cell.lat)),
     };
   }),
 
   /** Totals for the "explored" readout. */
   summary: publicProcedure.query(async ({ ctx }) => {
-    const cells = await ctx.prisma.coverageCell.count();
-    return { cells, exploredAreaM2: fogClearedAreaM2(cells) };
+    // Cell area shrinks with latitude, so the mean latitude scales the total
+    // rather than reading every row back to sum exact per-cell areas.
+    const { _count, _avg } = await ctx.prisma.coverageCell.aggregate({
+      _count: { cellKey: true },
+      _avg: { lat: true },
+    });
+    const cells = _count.cellKey;
+    return { cells, exploredAreaM2: cells * fogCellAreaM2(_avg.lat ?? 0) };
   }),
 });

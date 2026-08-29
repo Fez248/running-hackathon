@@ -67,6 +67,11 @@ export function useRunTracker({
   const pendingAccuracyRef = useRef<number | null>(null);
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const traceIdRef = useRef<string | null>(null);
+  const tracePromiseRef = useRef<Promise<string | null> | null>(null);
+  const pathRef = useRef<Coordinate[]>([]);
+  const inFlightFlushRef = useRef<Promise<void> | null>(null);
+  /** Bumped on every start/stop so callbacks of a finished run can't write refs. */
+  const runIdRef = useRef(0);
 
   const reveal = api.coverage.reveal.useMutation({
     onSuccess: () => onRevealed?.(),
@@ -76,26 +81,44 @@ export function useRunTracker({
   const revealRef = useRef(reveal);
   revealRef.current = reveal;
 
-  const flush = useCallback(async () => {
+  const flush = useCallback(async (): Promise<void> => {
+    // Serialised: overlapping flushes would reorder points and lose retries.
+    if (inFlightFlushRef.current) return inFlightFlushRef.current;
     const points = pendingRef.current;
     if (points.length === 0) return;
     pendingRef.current = [];
     const accuracyM = pendingAccuracyRef.current ?? undefined;
     pendingAccuracyRef.current = null;
-    try {
-      await revealRef.current.mutateAsync({
-        points,
-        revealRadiusM,
-        accuracyM,
-        traceId: traceIdRef.current ?? undefined,
-      });
-    } catch {
-      // The fog stays cleared locally; the next flush re-reveals these cells.
-    }
+
+    const run = (async () => {
+      try {
+        await revealRef.current.mutateAsync({
+          points,
+          revealRadiusM,
+          accuracyM,
+          traceId: traceIdRef.current ?? undefined,
+        });
+      } catch {
+        // Requeue ahead of anything accepted meanwhile, so a transient outage
+        // delays coverage instead of losing it.
+        pendingRef.current = [...points, ...pendingRef.current];
+        if (accuracyM != null) {
+          pendingAccuracyRef.current = Math.min(
+            pendingAccuracyRef.current ?? Number.POSITIVE_INFINITY,
+            accuracyM,
+          );
+        }
+      } finally {
+        inFlightFlushRef.current = null;
+      }
+    })();
+    inFlightFlushRef.current = run;
+    return run;
   }, [revealRadiusM]);
 
   const stop = useCallback(
-    async ({ upload = true }: { upload?: boolean } = {}) => {
+    async () => {
+      runIdRef.current += 1;
       if (watchIdRef.current != null && typeof navigator !== 'undefined') {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
@@ -104,15 +127,20 @@ export function useRunTracker({
         clearInterval(flushTimerRef.current);
         flushTimerRef.current = null;
       }
-      // Awaited so the last fixes are persisted before the trace is closed.
-      await flush();
-
-      const points = path;
-      const traceId = traceIdRef.current;
-      traceIdRef.current = null;
       setStatus((s) => ({ ...s, active: false }));
 
-      if (upload && traceId && points.length >= 2) {
+      // The trace may still be opening: awaiting it keeps the last flush and the
+      // close attributed to this run rather than orphaning them.
+      const traceId = traceIdRef.current ?? (await tracePromiseRef.current) ?? null;
+      traceIdRef.current = traceId;
+      // Awaited so the last fixes are persisted before the trace is closed.
+      await flush();
+      await inFlightFlushRef.current;
+      traceIdRef.current = null;
+      tracePromiseRef.current = null;
+
+      const points = pathRef.current;
+      if (traceId && points.length >= 1) {
         try {
           await finishTrace.mutateAsync({ traceId, points });
         } catch {
@@ -120,7 +148,28 @@ export function useRunTracker({
         }
       }
     },
-    [flush, path, finishTrace],
+    [flush, finishTrace],
+  );
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+
+  /**
+   * A trace is opened on the first accepted fix rather than on start, so a run
+   * that never gets GPS (permission denied, no signal) leaves no empty trace.
+   */
+  const ensureTrace = useCallback(
+    (runId: number) => {
+      if (tracePromiseRef.current) return;
+      tracePromiseRef.current = startTrace
+        .mutateAsync({ startedAt: new Date() })
+        .then((trace) => {
+          if (runIdRef.current !== runId) return null;
+          traceIdRef.current = trace.id;
+          return trace.id;
+        })
+        .catch(() => null);
+    },
+    [startTrace],
   );
 
   const start = useCallback(() => {
@@ -133,9 +182,15 @@ export function useRunTracker({
       return;
     }
 
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
     filterRef.current = createGpsFilter();
     pendingRef.current = [];
     pendingAccuracyRef.current = null;
+    traceIdRef.current = null;
+    tracePromiseRef.current = null;
+    pathRef.current = [];
+    setPosition(null);
     setPath([]);
     setLocalCellKeys([]);
     setStatus((s) => ({
@@ -158,12 +213,6 @@ export function useRunTracker({
           timestamp: fix.timestamp,
         });
 
-        setPosition({
-          lat: fix.coords.latitude,
-          lng: fix.coords.longitude,
-          accuracyM: fix.coords.accuracy ?? null,
-        });
-
         if (!result.accepted) {
           setStatus((s) => ({
             ...s,
@@ -175,8 +224,13 @@ export function useRunTracker({
           return;
         }
 
+        ensureTrace(runId);
         const point = { lat: result.fix.lat, lng: result.fix.lng };
         pendingRef.current.push(point);
+        pathRef.current = [...pathRef.current, point];
+        // Only accepted, smoothed fixes move the runner: voice geocoding, the
+        // live fog hole and map following all read this position.
+        setPosition({ ...point, accuracyM: result.fix.accuracyM ?? null });
         const accuracyM = result.fix.accuracyM;
         if (accuracyM != null) {
           pendingAccuracyRef.current = Math.min(
@@ -204,15 +258,17 @@ export function useRunTracker({
         if (pendingRef.current.length >= REVEAL_FLUSH_POINTS) void flush();
       },
       (error) => {
+        const denied = error.code === error.PERMISSION_DENIED;
         setStatus((s) => ({
           ...s,
-          active: error.code !== error.PERMISSION_DENIED && s.active,
-          permission: error.code === error.PERMISSION_DENIED ? 'denied' : s.permission,
-          error:
-            error.code === error.PERMISSION_DENIED
-              ? 'Location permission denied — the fog can only clear with GPS access.'
-              : error.message || 'Could not get a GPS fix.',
+          permission: denied ? 'denied' : s.permission,
+          error: denied
+            ? 'Location permission denied — the fog can only clear with GPS access.'
+            : error.message || 'Could not get a GPS fix.',
         }));
+        // Denial is terminal: tear the run down through the same path as stop so
+        // no watch, timer or empty trace is left behind.
+        if (denied) void stopRef.current();
       },
       // enableHighAccuracy: GNSS instead of Wi-Fi/cell triangulation.
       // maximumAge 0: never reuse a cached fix, we want where the runner is now.
@@ -220,17 +276,7 @@ export function useRunTracker({
     );
 
     flushTimerRef.current = setInterval(() => void flush(), REVEAL_FLUSH_MS);
-
-    // A trace opened up front lets every flush attribute its cells to this run.
-    startTrace
-      .mutateAsync({ startedAt: new Date() })
-      .then((trace) => {
-        traceIdRef.current = trace.id;
-      })
-      .catch(() => {
-        // Coverage still persists, just without a trace to group it by.
-      });
-  }, [flush, revealRadiusM, startTrace]);
+  }, [ensureTrace, flush, revealRadiusM]);
 
   useEffect(
     () => () => {

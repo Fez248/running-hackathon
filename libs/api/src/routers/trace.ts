@@ -47,12 +47,16 @@ export const traceRouter = createTRPCRouter({
       }),
     ),
 
-  /** Close a trace opened by `start` with the path the runner actually covered. */
+  /**
+   * Close a trace opened by `start` with the path the runner actually covered.
+   * A single point is allowed so a run cut short still leaves a closed trace
+   * instead of an open one nothing will ever finish.
+   */
   finish: publicProcedure
     .input(
       z.object({
         traceId: z.string(),
-        points: z.array(coordinateSchema).min(2).max(10_000),
+        points: z.array(coordinateSchema).min(1).max(10_000),
       }),
     )
     .mutation(async ({ ctx, input }) => {
