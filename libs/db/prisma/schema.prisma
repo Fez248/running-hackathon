@@ -50,13 +50,19 @@ model Report {
   source    String  @default("MANUAL")
   /// Raw dictated utterance for a VOICE report, kept for auditing the parser.
   transcript String?
+  /// How well the server's parser understood a VOICE transcript, 0..1.
+  parseConfidence Float?
+  /// When a reviewer decided a queued VOICE report; null while it waits.
+  reviewedAt DateTime?
+  /// Reviewer's note on a rejected parse, for auditing the parser's failures.
+  reviewNote String?
   /// Idempotency key from the client so offline replays do not duplicate.
   clientReportId String? @unique
 
   agreeCount    Int   @default(0)
   disagreeCount Int   @default(0)
   confidence    Float @default(0.5)
-  status        String @default("ACTIVE") // ACTIVE | RESOLVED | REJECTED
+  status        String @default("ACTIVE") // ACTIVE | PENDING_REVIEW | RESOLVED | REJECTED
 
   authorId String?
   author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
@@ -73,6 +79,7 @@ model Report {
   @@index([kind])
   @@index([gridKey])
   @@index([createdAt])
+  @@index([status, createdAt])
 }
 
 /// Confirm / dispute signal from another contributor.

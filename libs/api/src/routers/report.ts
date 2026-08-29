@@ -5,8 +5,10 @@ import {
   confidence,
   createReportSchema,
   gridKey,
+  needsReview,
   parseVoiceReport,
   passabilityForProfile,
+  PENDING_REVIEW,
   type Passability,
   voiceReportSchema,
   voteSchema,
@@ -87,17 +89,29 @@ export const reportRouter = createTRPCRouter({
    * GPS fix it was spoken at. The server re-parses the transcript so the stored
    * report never depends on the client's parser version, and returns `null` when
    * the utterance named no sidewalk feature (ambient chatter).
+   *
+   * A parse the server is not confident about is stored `PENDING_REVIEW` rather
+   * than published: a guess about a curb is worse than a short delay for the
+   * person who has to get past it. `review.queue` picks those up.
    */
   createFromVoice: publicProcedure.input(voiceReportSchema).mutation(async ({ ctx, input }) => {
     if (input.clientReportId) {
       const existing = await ctx.prisma.report.findUnique({
         where: { clientReportId: input.clientReportId },
       });
-      if (existing) return { report: existing, parsed: null, ignored: false };
+      if (existing)
+        return {
+          report: existing,
+          parsed: null,
+          ignored: false,
+          pendingReview: existing.status === PENDING_REVIEW,
+        };
     }
 
     const parsed = parseVoiceReport(input.transcript, input.recognitionConfidence);
-    if (!parsed) return { report: null, parsed: null, ignored: true };
+    if (!parsed) return { report: null, parsed: null, ignored: true, pendingReview: false };
+
+    const pendingReview = needsReview(parsed.parseConfidence);
 
     const data = {
       lat: input.lat,
@@ -116,6 +130,8 @@ export const reportRouter = createTRPCRouter({
       traceId: input.traceId ?? null,
       clientReportId: input.clientReportId ?? null,
       authorId: ctx.user?.id ?? null,
+      parseConfidence: parsed.parseConfidence,
+      status: pendingReview ? PENDING_REVIEW : 'ACTIVE',
       confidence:
         confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }) *
         parsed.parseConfidence,
@@ -129,7 +145,7 @@ export const reportRouter = createTRPCRouter({
         })
       : await ctx.prisma.report.create({ data });
 
-    return { report, parsed, ignored: false };
+    return { report, parsed, ignored: false, pendingReview };
   }),
 
   /** Offline queue flush: send everything captured while out of signal. */
