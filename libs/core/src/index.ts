@@ -1,5 +1,6 @@
 export * from './obstacles';
 export * from './geo';
+export * from './passability';
 export * from './scoring';
 export * from './transformer';
 export * from './fog';
