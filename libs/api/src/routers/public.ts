@@ -125,51 +125,63 @@ async function verdictsForLeg(
   const reportsComplete = legReports.length < MAX_SCANNED_REPORTS;
   const cellsComplete = legCells.length < MAX_SCANNED_CELLS;
 
-  return Promise.all(
-    waypoints.map(async (waypoint, index) => {
-      const where = neighbourhoods[index]!;
-      const [nearby, cells] = await Promise.all([
-        reportsComplete
-          ? legReports
-          : readAll((cursor) =>
-              prisma.report.findMany({
-                where: { OR: where },
-                select: REPORT_COLUMNS,
-                orderBy: { id: 'asc' },
-                take: WAYPOINT_PAGE,
-                ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-              }),
-            ),
-        cellsComplete
-          ? legCells
-          : readAll((cursor) =>
-              prisma.coverageCell.findMany({
-                where: { OR: where },
-                select: { id: true, lat: true, lng: true },
-                orderBy: { id: 'asc' },
-                take: WAYPOINT_PAGE,
-                ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-              }),
-            ),
-      ]);
+  /**
+   * Evidence per distinct waypoint. A leg may send the same waypoint more than
+   * once — a loop, a stop, a re-planned route — and reading its neighbourhood
+   * once per copy would multiply the work for an identical answer. The reads run
+   * one after another rather than all at once, so a dense leg costs a long
+   * request instead of fifty concurrent scans.
+   */
+  const evidence = new Map<string, { reports: typeof legReports; cells: typeof legCells }>();
+  for (const [index, waypoint] of waypoints.entries()) {
+    const key = `${waypoint.lat},${waypoint.lng}`;
+    if (evidence.has(key)) continue;
+    const where = neighbourhoods[index]!;
 
-      const inRadius = nearby
-        .map((report) => ({
-          ...report,
-          distanceM: distanceMeters(waypoint, { lat: report.lat, lng: report.lng }),
-        }))
-        .filter((report) => report.distanceM <= radiusM);
-      const observations = observationsFrom(inRadius);
-      // Revealed fog is the only way to tell "walked, nothing to flag" apart
-      // from "nobody has ever been here", and a fleet routes differently on the
-      // two. A resolved or rejected report is not evidence about passability any
-      // more, but it is still proof that someone was here.
-      const surveyed =
-        inRadius.length > 0 || cells.some((cell) => distanceMeters(waypoint, cell) <= radiusM);
+    evidence.set(key, {
+      reports: reportsComplete
+        ? legReports
+        : await readAll((cursor) =>
+            prisma.report.findMany({
+              where: { OR: where },
+              select: REPORT_COLUMNS,
+              orderBy: { id: 'asc' },
+              take: WAYPOINT_PAGE,
+              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            }),
+          ),
+      cells: cellsComplete
+        ? legCells
+        : await readAll((cursor) =>
+            prisma.coverageCell.findMany({
+              where: { OR: where },
+              select: { id: true, lat: true, lng: true },
+              orderBy: { id: 'asc' },
+              take: WAYPOINT_PAGE,
+              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            }),
+          ),
+    });
+  }
 
-      return { ...waypoint, ...aggregatePassability(observations, { profile, radiusM, surveyed }) };
-    }),
-  );
+  return waypoints.map((waypoint) => {
+    const { reports, cells } = evidence.get(`${waypoint.lat},${waypoint.lng}`)!;
+    const inRadius = reports
+      .map((report) => ({
+        ...report,
+        distanceM: distanceMeters(waypoint, { lat: report.lat, lng: report.lng }),
+      }))
+      .filter((report) => report.distanceM <= radiusM);
+    const observations = observationsFrom(inRadius);
+    // Revealed fog is the only way to tell "walked, nothing to flag" apart from
+    // "nobody has ever been here", and a fleet routes differently on the two. A
+    // resolved or rejected report is not evidence about passability any more,
+    // but it is still proof that someone was here.
+    const surveyed =
+      inRadius.length > 0 || cells.some((cell) => distanceMeters(waypoint, cell) <= radiusM);
+
+    return { ...waypoint, ...aggregatePassability(observations, { profile, radiusM, surveyed }) };
+  });
 }
 
 /** `where` fragments whose union covers a waypoint's radius, to be OR-ed. */

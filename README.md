@@ -190,7 +190,9 @@ How the verdict is reached (`libs/core/src/passability.ts`):
 `radiusM` is capped at 200 m per waypoint, so no single call can scan a city. A leg is read with one
 query per table while that read stays under its row cap; if a dense stretch fills it, each waypoint is
 re-read against its own radius and paged to the end, so a busy neighbourhood cannot starve the
-waypoints after it and no row inside a radius is dropped before the distance filter runs.
+waypoints after it and no row inside a radius is dropped before the distance filter runs. Those
+per-waypoint reads run one after another and are shared between repeated waypoints, so a leg that
+visits the same corner several times pays for it once.
 
 ## Stack
 
