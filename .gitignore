@@ -26,3 +26,11 @@ next-env.d.ts
 .turbo/
 .vscode/
 .idea/
+
+# python (apps/bridge, libs/imukit)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
