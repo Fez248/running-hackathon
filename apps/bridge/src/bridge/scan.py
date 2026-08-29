@@ -172,16 +172,24 @@ def to_geojson(result: ScanResult) -> dict:
     }
 
 
+def source_label(source: str) -> str:
+    """The recording's bare name, as the map records it."""
+    return Path(source).name or source
+
+
 def default_client_scan_id(result: ScanResult) -> str:
     """Content-addressed id for a scan.
 
     The ingest endpoint deduplicates on this id, so it is derived from what the
     scan actually says rather than from how it was produced: two runs that make
     the same claim about the same route are the same scan, whatever settings
-    they used, and any run whose findings or certificate differ hashes
-    differently. Pass ``--client-scan-id`` to key a scan on something else.
+    they used or wherever the recording sat on disk, and any run whose findings
+    or certificate differ hashes differently. Pass ``--client-scan-id`` to key a
+    scan on something else.
     """
-    material = json.dumps(result.as_dict(), sort_keys=True, default=str)
+    claim = dict(result.as_dict())
+    claim["source"] = source_label(result.source)
+    material = json.dumps(claim, sort_keys=True, default=str)
     return "scan-" + hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
@@ -199,7 +207,7 @@ def to_map_payload(result: ScanResult, client_scan_id: str | None = None) -> dic
     """
     q = result.quality
     return {
-        "source": Path(result.source).name or result.source,
+        "source": source_label(result.source),
         "format": result.format,
         "quality": {
             "fsHz": q.fs_hz,

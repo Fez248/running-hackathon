@@ -8,6 +8,7 @@ instead of at upload time.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -114,6 +115,16 @@ def test_client_scan_id_is_content_addressed(tmp_path):
     # Different detector settings are a different claim about the pavement.
     assert default_client_scan_id(loose) != default_client_scan_id(a)
     assert to_map_payload(a, "scan-mine")["clientScanId"] == "scan-mine"
+
+
+def test_client_scan_id_ignores_where_the_recording_was_scanned_from(tmp_path):
+    result, _pp = scan_recording(_good_recording(tmp_path))
+    moved = replace(result, source="/somewhere/else/rec")
+
+    # The id keys the claim the map receives, and the map only receives the
+    # bare name — so scanning the same recording from two directories must not
+    # import the same findings twice.
+    assert default_client_scan_id(moved) == default_client_scan_id(result)
 
 
 def test_write_output_map_format(tmp_path):
