@@ -3,6 +3,7 @@ import {
   coverageBoundsSchema,
   coverageRevealSchema,
   fogCellBounds,
+  fogCellCenter,
   fogCellIndexFromKey,
   fogCellsAlongPath,
   fogClearedAreaM2,
@@ -53,31 +54,48 @@ export const coverageRouter = createTRPCRouter({
       select: { cellKey: true },
     });
     const known = new Set(existing.map((cell) => cell.cellKey));
+    const newKeys = keys.filter((key) => !known.has(key));
 
-    for (const cellKey of keys) {
+    const created = newKeys.flatMap((cellKey) => {
       const index = fogCellIndexFromKey(cellKey);
-      if (!index) continue;
-      const bounds = fogCellBounds(index);
-      const lat = (bounds.minLat + bounds.maxLat) / 2;
-      const lng = (bounds.minLng + bounds.maxLng) / 2;
-
-      await ctx.prisma.coverageCell.upsert({
-        where: { cellKey },
-        update: {
-          visits: { increment: 1 },
-          ...(input.traceId ? { traceId: input.traceId } : {}),
-        },
-        create: {
+      if (!index) return [];
+      const center = fogCellCenter(index);
+      return [
+        {
           cellKey,
-          lat,
-          lng,
+          lat: center.lat,
+          lng: center.lng,
+          bestAccuracyM: input.accuracyM ?? null,
           traceId: input.traceId ?? null,
           userId: ctx.user?.id ?? null,
         },
-      });
+      ];
+    });
+
+    // One round-trip per group instead of per cell: a flush can carry hundreds
+    // of cells. SQLite has no `skipDuplicates`, so a concurrent runner revealing
+    // the same street can break the batch — then fall back to per-cell upserts.
+    try {
+      await ctx.prisma.$transaction([
+        ctx.prisma.coverageCell.createMany({ data: created }),
+        ctx.prisma.coverageCell.updateMany({
+          where: { cellKey: { in: [...known] } },
+          data: {
+            visits: { increment: 1 },
+            ...(input.traceId ? { traceId: input.traceId } : {}),
+          },
+        }),
+      ]);
+    } catch {
+      for (const cell of created) {
+        await ctx.prisma.coverageCell.upsert({
+          where: { cellKey: cell.cellKey },
+          update: { visits: { increment: 1 } },
+          create: cell,
+        });
+      }
     }
 
-    const newKeys = keys.filter((key) => !known.has(key));
     return {
       revealed: keys.length,
       newlyRevealed: newKeys.length,

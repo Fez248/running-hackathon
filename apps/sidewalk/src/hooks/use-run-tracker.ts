@@ -64,21 +64,34 @@ export function useRunTracker({
   const watchIdRef = useRef<number | null>(null);
   const filterRef = useRef<GpsFilter | null>(null);
   const pendingRef = useRef<Coordinate[]>([]);
+  const pendingAccuracyRef = useRef<number | null>(null);
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startedAtRef = useRef<Date | null>(null);
+  const traceIdRef = useRef<string | null>(null);
 
   const reveal = api.coverage.reveal.useMutation({
     onSuccess: () => onRevealed?.(),
   });
-  const uploadTrace = api.trace.upload.useMutation();
+  const startTrace = api.trace.start.useMutation();
+  const finishTrace = api.trace.finish.useMutation();
   const revealRef = useRef(reveal);
   revealRef.current = reveal;
 
-  const flush = useCallback(() => {
+  const flush = useCallback(async () => {
     const points = pendingRef.current;
     if (points.length === 0) return;
     pendingRef.current = [];
-    revealRef.current.mutate({ points, revealRadiusM });
+    const accuracyM = pendingAccuracyRef.current ?? undefined;
+    pendingAccuracyRef.current = null;
+    try {
+      await revealRef.current.mutateAsync({
+        points,
+        revealRadiusM,
+        accuracyM,
+        traceId: traceIdRef.current ?? undefined,
+      });
+    } catch {
+      // The fog stays cleared locally; the next flush re-reveals these cells.
+    }
   }, [revealRadiusM]);
 
   const stop = useCallback(
@@ -91,22 +104,23 @@ export function useRunTracker({
         clearInterval(flushTimerRef.current);
         flushTimerRef.current = null;
       }
-      flush();
+      // Awaited so the last fixes are persisted before the trace is closed.
+      await flush();
 
       const points = path;
-      const startedAt = startedAtRef.current;
-      startedAtRef.current = null;
+      const traceId = traceIdRef.current;
+      traceIdRef.current = null;
       setStatus((s) => ({ ...s, active: false }));
 
-      if (upload && points.length >= 2) {
+      if (upload && traceId && points.length >= 2) {
         try {
-          await uploadTrace.mutateAsync({ points, startedAt: startedAt ?? undefined });
+          await finishTrace.mutateAsync({ traceId, points });
         } catch {
-          // A failed trace upload must not lose the run: the fog is already saved.
+          // A failed trace close must not lose the run: the fog is already saved.
         }
       }
     },
-    [flush, path, uploadTrace],
+    [flush, path, finishTrace],
   );
 
   const start = useCallback(() => {
@@ -121,7 +135,7 @@ export function useRunTracker({
 
     filterRef.current = createGpsFilter();
     pendingRef.current = [];
-    startedAtRef.current = new Date();
+    pendingAccuracyRef.current = null;
     setPath([]);
     setLocalCellKeys([]);
     setStatus((s) => ({
@@ -163,6 +177,13 @@ export function useRunTracker({
 
         const point = { lat: result.fix.lat, lng: result.fix.lng };
         pendingRef.current.push(point);
+        const accuracyM = result.fix.accuracyM;
+        if (accuracyM != null) {
+          pendingAccuracyRef.current = Math.min(
+            pendingAccuracyRef.current ?? Number.POSITIVE_INFINITY,
+            accuracyM,
+          );
+        }
         setPath((current) => [...current, point]);
         setLocalCellKeys((current) => {
           const next = new Set(current);
@@ -180,7 +201,7 @@ export function useRunTracker({
           quality: gpsQuality(result.fix.accuracyM),
         }));
 
-        if (pendingRef.current.length >= REVEAL_FLUSH_POINTS) flush();
+        if (pendingRef.current.length >= REVEAL_FLUSH_POINTS) void flush();
       },
       (error) => {
         setStatus((s) => ({
@@ -198,8 +219,18 @@ export function useRunTracker({
       { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 },
     );
 
-    flushTimerRef.current = setInterval(flush, REVEAL_FLUSH_MS);
-  }, [flush, revealRadiusM]);
+    flushTimerRef.current = setInterval(() => void flush(), REVEAL_FLUSH_MS);
+
+    // A trace opened up front lets every flush attribute its cells to this run.
+    startTrace
+      .mutateAsync({ startedAt: new Date() })
+      .then((trace) => {
+        traceIdRef.current = trace.id;
+      })
+      .catch(() => {
+        // Coverage still persists, just without a trace to group it by.
+      });
+  }, [flush, revealRadiusM, startTrace]);
 
   useEffect(
     () => () => {

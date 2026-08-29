@@ -114,7 +114,7 @@ model CoverageCell {
   lng       Float
   /// How many accepted GPS fixes have landed in this cell.
   visits    Int    @default(1)
-  /// Best (lowest) GPS accuracy in metres seen while revealing the cell.
+  /// GPS accuracy in metres of the batch that first revealed this cell.
   bestAccuracyM Float?
 
   traceId String?

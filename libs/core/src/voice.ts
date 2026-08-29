@@ -182,6 +182,8 @@ export type CoverageBoundsInput = z.infer<typeof coverageBoundsSchema>;
 export const coverageRevealSchema = z.object({
   points: z.array(coordinateSchema).min(1).max(500),
   revealRadiusM: z.number().min(5).max(100).optional(),
+  /** Best GPS accuracy in the batch, recorded on cells this call first reveals. */
+  accuracyM: z.number().min(0).max(500).optional(),
   traceId: z.string().optional(),
 });
 export type CoverageRevealInput = z.infer<typeof coverageRevealSchema>;
