@@ -106,9 +106,11 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
   const sessionStartedAtRef = useRef(0);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
-   * Bumped by anything that ends a session. `getUserMedia` can resolve after the
-   * run has stopped or the component has unmounted, and that late stream would
-   * otherwise be kept and recognised from.
+   * Identifies the current start attempt. `getUserMedia` is awaited, so an
+   * attempt can settle after the run stopped, after the hook unmounted, or after
+   * a later attempt replaced it — and none of its effects (a kept stream, a
+   * permission state, `releaseMic`, clearing the spinner) may be applied then.
+   * Bumped both by starting an attempt and by anything that ends a session.
    */
   const generationRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
@@ -333,7 +335,8 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
 
     setStarting(true);
     setError(null);
-    const generation = generationRef.current;
+    const generation = (generationRef.current += 1);
+    const isCurrent = () => generation === generationRef.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -344,7 +347,7 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
           autoGainControl: true,
         },
       });
-      if (generation !== generationRef.current) {
+      if (!isCurrent()) {
         stream.getTracks().forEach((track) => track.stop());
         return false;
       }
@@ -361,6 +364,7 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
       setListening(true);
       return true;
     } catch (cause) {
+      if (!isCurrent()) return false;
       const name = cause instanceof Error ? cause.name : '';
       if (name === 'NotAllowedError' || name === 'SecurityError') {
         setMicState('denied');
@@ -375,7 +379,9 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
       wantListeningRef.current = false;
       return false;
     } finally {
-      setStarting(false);
+      // A superseded attempt must not clear the spinner belonging to its
+      // replacement; a session that ended clears it in `stopRecognition`.
+      if (isCurrent()) setStarting(false);
     }
   }, [releaseMic, spawnRecognition, startMeter, stopRecognition]);
 
