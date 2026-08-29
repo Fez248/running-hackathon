@@ -8,7 +8,10 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
+  // Local development default. Remote libSQL/Turso databases are reached through the
+  // libSQL driver adapter (see src/client.ts and prisma.config.ts), which replaces this
+  // url; Prisma still requires a `file:` value here to validate the schema.
+  url      = "file:./dev.db"
 }
 
 model User {
