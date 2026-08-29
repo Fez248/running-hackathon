@@ -1,7 +1,23 @@
 'use client';
 
-import { CircleMarker, MapContainer, Popup, TileLayer, useMapEvents } from 'react-leaflet';
-import { OBSTACLE_LABELS, type ObstacleKind, type Passability } from '@sidewalk/core';
+import { useEffect } from 'react';
+import {
+  CircleMarker,
+  MapContainer,
+  Polyline,
+  Popup,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from 'react-leaflet';
+import {
+  OBSTACLE_LABELS,
+  type Coordinate,
+  type FogBounds,
+  type ObstacleKind,
+  type Passability,
+} from '@sidewalk/core';
+import { FogLayer, type FogCell } from './fog-layer';
 import type { Selection, Viewport } from './map-workspace';
 
 const COLORS: Record<Passability, string> = {
@@ -18,6 +34,7 @@ export interface MapReport {
   kind: string;
   note: string | null;
   confidence: number;
+  source?: string;
   effectivePassability: Passability;
 }
 
@@ -27,6 +44,15 @@ interface MapViewProps {
   selection: Selection | null;
   onPick: (coord: { lat: number; lng: number }) => void;
   onViewportChange: (viewport: Viewport) => void;
+  fog: {
+    enabled: boolean;
+    cells: FogCell[];
+    pendingBounds: FogBounds[];
+    liveHole: { lat: number; lng: number; radiusM: number } | null;
+  };
+  runPath: Coordinate[];
+  livePosition: (Coordinate & { accuracyM: number | null }) | null;
+  follow: boolean;
 }
 
 function MapEvents({
@@ -50,7 +76,33 @@ function MapEvents({
   return null;
 }
 
-export function MapView({ center, reports, selection, onPick, onViewportChange }: MapViewProps) {
+/** Keeps the runner in view while a run is active. */
+function FollowPosition({
+  position,
+  follow,
+}: {
+  position: Coordinate | null;
+  follow: boolean;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!follow || !position) return;
+    map.panTo([position.lat, position.lng], { animate: true });
+  }, [follow, position, map]);
+  return null;
+}
+
+export function MapView({
+  center,
+  reports,
+  selection,
+  onPick,
+  onViewportChange,
+  fog,
+  runPath,
+  livePosition,
+  follow,
+}: MapViewProps) {
   return (
     <div className="map-wrap">
       <MapContainer center={[center.lat, center.lng]} zoom={16} scrollWheelZoom>
@@ -59,16 +111,33 @@ export function MapView({ center, reports, selection, onPick, onViewportChange }
           url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <MapEvents onPick={onPick} onViewportChange={onViewportChange} />
+        <FollowPosition position={livePosition} follow={follow} />
+
+        <FogLayer
+          cells={fog.cells}
+          pendingBounds={fog.pendingBounds}
+          liveHole={fog.liveHole}
+          opacity={0.82}
+          visible={fog.enabled}
+        />
+
+        {runPath.length > 1 ? (
+          <Polyline
+            positions={runPath.map((point) => [point.lat, point.lng])}
+            pathOptions={{ color: '#38bdf8', weight: 4, opacity: 0.9 }}
+          />
+        ) : null}
 
         {reports.map((report) => (
           <CircleMarker
             key={report.id}
             center={[report.lat, report.lng]}
-            radius={7}
+            radius={report.source === 'VOICE' ? 9 : 7}
             pathOptions={{
               color: COLORS[report.effectivePassability],
               fillColor: COLORS[report.effectivePassability],
               fillOpacity: 0.6,
+              dashArray: report.source === 'VOICE' ? '3' : undefined,
             }}
           >
             <Popup>
@@ -76,6 +145,7 @@ export function MapView({ center, reports, selection, onPick, onViewportChange }
               <br />
               {report.effectivePassability.toLowerCase()} · {(report.confidence * 100).toFixed(0)}%
               confidence
+              {report.source === 'VOICE' ? ' · dictated' : ''}
               {report.note ? (
                 <>
                   <br />
@@ -85,6 +155,14 @@ export function MapView({ center, reports, selection, onPick, onViewportChange }
             </Popup>
           </CircleMarker>
         ))}
+
+        {livePosition ? (
+          <CircleMarker
+            center={[livePosition.lat, livePosition.lng]}
+            radius={8}
+            pathOptions={{ color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 0.9 }}
+          />
+        ) : null}
 
         {selection ? (
           <CircleMarker

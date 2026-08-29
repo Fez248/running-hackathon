@@ -69,7 +69,14 @@ which is fine to city scale. Postgres + PostGIS is the documented upgrade path (
   `status` (`ACTIVE` | `RESOLVED` | `REJECTED`).
 - **Vote** — confirm/dispute, unique per `(reportId, userId)`.
 - **Trace** — a run/ride: JSON path, `distanceM`, timestamps; reports captured during it link back
-  to it, which gives "surveyed coverage" separately from "reports found".
+  to it, which gives "surveyed coverage" separately from "reports found". Opened when a run starts
+  (empty path) and closed with the path on stop, so mid-run coverage can be attributed to it.
+- **CoverageCell** — one revealed Fog of War cell: `cellKey` (unique `${y}_${x}` grid index at
+  `FOG_CELL_SIZE_DEG = 0.00025`, ~28 m), denormalised centre `lat`/`lng` for indexed viewport scans,
+  `visits`, `bestAccuracyM`, optional `traceId`/`userId`. Keying by cell makes reveal idempotent:
+  running the same street twice cannot double-clear or duplicate rows.
+- **Report** additionally carries `source` (`MANUAL` | `VOICE`) and `transcript`, so a dictated
+  report keeps the raw utterance the parser was fed.
 
 Enums are stored as strings because SQLite lacks native enums; the single source of truth is
 `libs/core/src/obstacles.ts` (`OBSTACLE_KINDS`, `PASSABILITY`, `PROFILES`) with matching zod enums.
@@ -88,7 +95,12 @@ and minimum width thresholds per profile. Both are pure functions in `libs/core`
 | `report.createMany` | mutation | Offline queue flush (≤200 reports, upsert by `clientReportId`) |
 | `report.vote` | mutation | Confirm/dispute; recomputes counts, confidence and auto-rejects heavily disputed reports |
 | `report.resolve` | mutation | Mark a feature fixed (roadworks removed, ramp built) |
-| `trace.upload` | mutation | Store a run/ride path, server-computes distance |
+| `trace.upload` | mutation | Store a run/ride path in one call, server-computes distance |
+| `trace.start` / `trace.finish` | mutation | Open a trace at run start, close it with the path on stop |
+| `coverage.byBounds` | query | Revealed fog cells in the viewport, with their bounds |
+| `coverage.reveal` | mutation | Reveal fog along a batch of accepted GPS fixes (batched create/update, idempotent per cell) |
+| `coverage.summary` | query | Cell count and explored area for the "explored" readout |
+| `report.createFromVoice` | mutation | Dictated utterance geocoded to the live fix; re-parsed server-side, ignored when it names no feature |
 | `trace.recent` | query | Recent traces for coverage display |
 | `stats.summary` | query | Report counts by kind, surveyed km, contributor leaderboard |
 
@@ -123,6 +135,15 @@ Planned for the demo build-out (in priority order):
 5. **Trace recording** — start/stop a run, upload the path, show surveyed streets as a heat overlay
    and award points for new coverage.
 
+Added on top of the scaffold (Fog of War):
+
+- Canvas fog overlay in Leaflet's `overlayPane` — a single canvas with `destination-out` holes for
+  revealed cells, pending local cells and a live radial hole, instead of thousands of rectangles.
+- Run controls: high-accuracy `watchPosition` filtered by `libs/core/src/gps.ts`, optimistic local
+  fog clearing, batched `coverage.reveal`, follow-the-runner panning, live path polyline.
+- Ambient voice reporting: Web Speech API dictation parsed by `libs/core/src/voice.ts`, geocoded to
+  the latest accepted fix, with a typed fallback where the API is unavailable.
+
 ## 7. MVP scope (hackathon cut)
 
 **In scope (done ✅ / next ▶):**
@@ -133,6 +154,7 @@ Planned for the demo build-out (in priority order):
 - ▶ Confirm/dispute from the map.
 - ▶ Offline queue.
 - ▶ Route sanity check for the pitch.
+- ✅ Fog of War coverage, high-accuracy run tracking and ambient voice reporting.
 
 **Out of scope:** real auth/SSO, photo upload storage, moderation console, OSM write-back,
 true routing engine, native app, multi-city tiling infrastructure.
@@ -144,7 +166,11 @@ true routing engine, native app, multi-city tiling infrastructure.
   (`confidence`, `passabilityForProfile`), i.e. the rules a demo can get wrong silently.
 - `npm run lint` — `eslint-config-next` on the app.
 - `npm run build` — production Next build (also type-checks the app routes).
-- `npm run db:push && npm run db:seed` — reproducible 8-report Berlin Mitte fixture.
+- `npm run db:push && npm run db:seed` — reproducible Berlin Mitte fixture.
+- Fog/GPS/voice rules are unit tested in `libs/core` (grid key stability, accuracy/jump/jitter
+  rejection, smoothing weights, parser precision incl. ambient chatter that must be ignored).
+- Not covered yet: a browser run cannot be exercised on a desktop without synthetic fixes, so fog
+  clearing along a real path is unverified by automated tests.
 - Next testing steps: router integration tests against a temporary SQLite file
   (`appRouter.createCaller`), a zod round-trip test per procedure input, and one Playwright smoke
   test (load map → capture report → marker appears).
