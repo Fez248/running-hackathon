@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { scanIngestSchema, type ScanIngestInput } from '@sidewalk/core';
 import { api } from '@/trpc/client';
 
@@ -38,7 +38,16 @@ export function ScanPanel() {
     },
   });
 
+  // Reading a file is async, so two quick picks can finish out of order and
+  // leave the newest filename standing next to the older file's payload — the
+  // upload would then send a scan the user had already replaced. Only the read
+  // that is still the current selection may write to the panel.
+  const selection = useRef(0);
+
   const readFile = async (file: File) => {
+    const mine = ++selection.current;
+    const isCurrent = () => selection.current === mine;
+
     setParseError(null);
     setPayload(null);
     setFileName(file.name);
@@ -48,9 +57,10 @@ export function ScanPanel() {
     try {
       raw = JSON.parse(await file.text());
     } catch {
-      setParseError('That file is not JSON. Export it with `--format map`.');
+      if (isCurrent()) setParseError('That file is not JSON. Export it with `--format map`.');
       return;
     }
+    if (!isCurrent()) return;
 
     const parsed = scanIngestSchema.safeParse(raw);
     if (!parsed.success) {
