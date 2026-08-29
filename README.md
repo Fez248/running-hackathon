@@ -30,10 +30,14 @@ npm run dev            # http://localhost:3000
 
 Or: `npm run setup && npm run dev`.
 
-Configuration lives in one place: the repository-root `.env`. Prisma commands load it through
-`dotenv-cli` and Next loads it in `apps/sidewalk/next.config.mjs`, so `DATABASE_URL` resolves
-identically from the root, `libs/db` and `apps/sidewalk`. `file:./dev.db` is relative to
-`libs/db/prisma/schema.prisma`, i.e. `libs/db/prisma/dev.db`.
+Configuration lives in one place: the repository-root `.env`. Prisma CLI commands load it through
+`dotenv-cli`, and at runtime `libs/db` walks up from the current working directory to find it, so
+`DATABASE_URL` resolves identically for the dev server, the production server and one-off scripts,
+whatever directory they start in. `file:./dev.db` is relative to `libs/db/prisma/schema.prisma`,
+i.e. `libs/db/prisma/dev.db`.
+
+The seed appends, so re-seeding a populated database duplicates rows — use `npm run db:reset`
+(force-reset the schema, then seed) to get back to the 8-report fixture.
 
 ## Scripts
 
@@ -45,6 +49,7 @@ identically from the root, `libs/db` and `apps/sidewalk`. `file:./dev.db` is rel
 | `npm run lint` | ESLint (`next/core-web-vitals`) |
 | `npm test` | Vitest unit tests (`libs/core`) |
 | `npm run db:push` / `db:seed` / `db:studio` | Prisma against `libs/db/prisma/dev.db` |
+| `npm run db:reset` | Drop and recreate the database, then re-seed |
 
 ## Stack
 
