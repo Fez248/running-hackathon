@@ -39,6 +39,19 @@ i.e. `libs/db/prisma/dev.db`.
 The seed appends, so re-seeding a populated database duplicates rows — use `npm run db:reset`
 (force-reset the schema, then seed) to get back to the 8-report fixture.
 
+## Turso / deployment
+
+The same Prisma schema runs on a local SQLite file and on a remote libSQL database (Turso). When
+`DATABASE_URL` uses a remote scheme (`libsql://`, `https://`, `wss://`), `libs/db` builds the client
+on top of `@prisma/adapter-libsql` and needs `TURSO_AUTH_TOKEN`; a `file:` URL keeps the built-in
+SQLite connector. `libs/db/prisma.config.ts` wires the same adapter into the Prisma CLI, so
+`db:push`, `db:seed` and `db:studio` target Turso with no extra flags.
+
+Deploying to Vercel: root directory `apps/sidewalk` (npm workspaces are installed from the repo
+root), `prisma generate` runs from the app's `prebuild` script, and the project needs `DATABASE_URL`
+plus `TURSO_AUTH_TOKEN` set for Production, Preview and Development. Push the schema once per
+database with `npm run db:push`.
+
 ## Scripts
 
 | Command | Description |

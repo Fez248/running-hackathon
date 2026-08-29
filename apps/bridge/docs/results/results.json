@@ -1,0 +1,492 @@
+{
+  "E1_cadence_separation": {
+    "summary": {
+      "true_step_freq_hz": 2.8,
+      "estimated_step_freq_hz": 2.75,
+      "step_freq_abs_error_hz": 0.05,
+      "gait_band_suppression_db": -21.85,
+      "shock_band_retention_db": -0.36,
+      "footfalls_detected": 374
+    },
+    "detail": {
+      "n_windows": 176
+    }
+  },
+  "E2_single_pass": {
+    "summary": {
+      "n_passes": 5,
+      "symmetric_threshold_sweep": {
+        "2.0": {
+          "precision": 0.526,
+          "recall": 1.0,
+          "f1": 0.687
+        },
+        "2.5": {
+          "precision": 0.56,
+          "recall": 1.0,
+          "f1": 0.717
+        },
+        "3.0": {
+          "precision": 1.0,
+          "recall": 0.8,
+          "f1": 0.88
+        },
+        "4.0": {
+          "precision": 1.0,
+          "recall": 0.667,
+          "f1": 0.8
+        },
+        "5.0": {
+          "precision": 1.0,
+          "recall": 0.667,
+          "f1": 0.8
+        }
+      },
+      "mean_precision": 1.0,
+      "mean_recall": 0.8,
+      "mean_f1": 0.88,
+      "mean_roc_auc": 0.799,
+      "mean_localization_error_m": 7.44
+    },
+    "detail": {
+      "per_seed": [
+        {
+          "seed": 1,
+          "tp": 2,
+          "fp": 0,
+          "fn": 1,
+          "precision": 1.0,
+          "recall": 0.6666666666666666,
+          "f1": 0.8,
+          "mean_localization_error_m": 5.816590454167198,
+          "roc_auc": 0.907,
+          "detections": [
+            {
+              "start_m": 78.92884066399331,
+              "end_m": 85.882772165324,
+              "peak_m": 81.50015534902587,
+              "score": 10.008172657984211,
+              "direction": "excess"
+            },
+            {
+              "start_m": 306.5374755831587,
+              "end_m": 321.0078864283132,
+              "peak_m": 315.13333625736027,
+              "score": 6.418111556834676,
+              "direction": "excess"
+            }
+          ]
+        },
+        {
+          "seed": 2,
+          "tp": 2,
+          "fp": 0,
+          "fn": 1,
+          "precision": 1.0,
+          "recall": 0.6666666666666666,
+          "f1": 0.8,
+          "mean_localization_error_m": 4.109350324825023,
+          "roc_auc": 0.914,
+          "detections": [
+            {
+              "start_m": 81.75844514171733,
+              "end_m": 90.08549866874243,
+              "peak_m": 87.21363310086805,
+              "score": 8.875622455801416,
+              "direction": "excess"
+            },
+            {
+              "start_m": 305.12813561394,
+              "end_m": 316.428355061626,
+              "peak_m": 311.005067548782,
+              "score": 6.263201244429144,
+              "direction": "excess"
+            }
+          ]
+        },
+        {
+          "seed": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 11.60420477279959,
+          "roc_auc": 0.561,
+          "detections": [
+            {
+              "start_m": 82.12774943817878,
+              "end_m": 91.90068544783834,
+              "peak_m": 88.27865701414572,
+              "score": 9.791634940462066,
+              "direction": "excess"
+            },
+            {
+              "start_m": 207.07339715100838,
+              "end_m": 212.4147459375787,
+              "peak_m": 207.07339715100838,
+              "score": 3.1275869091920203,
+              "direction": "attenuation"
+            },
+            {
+              "start_m": 314.7875167771532,
+              "end_m": 327.0872352523754,
+              "peak_m": 321.96056015324467,
+              "score": 6.895600929045024,
+              "direction": "excess"
+            }
+          ]
+        },
+        {
+          "seed": 4,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 9.852967948346995,
+          "roc_auc": 0.771,
+          "detections": [
+            {
+              "start_m": 84.26338835545886,
+              "end_m": 90.68542063167891,
+              "peak_m": 86.74159669331519,
+              "score": 10.14966855441315,
+              "direction": "excess"
+            },
+            {
+              "start_m": 198.39280636425457,
+              "end_m": 211.33504151454986,
+              "peak_m": 209.6478586551695,
+              "score": 3.867392640195047,
+              "direction": "attenuation"
+            },
+            {
+              "start_m": 311.9225114311296,
+              "end_m": 321.95680247012456,
+              "peak_m": 315.6694484965563,
+              "score": 7.083882762954296,
+              "direction": "excess"
+            }
+          ]
+        },
+        {
+          "seed": 5,
+          "tp": 2,
+          "fp": 0,
+          "fn": 1,
+          "precision": 1.0,
+          "recall": 0.6666666666666666,
+          "f1": 0.8,
+          "mean_localization_error_m": 5.835211012718119,
+          "roc_auc": 0.842,
+          "detections": [
+            {
+              "start_m": 83.58283154534242,
+              "end_m": 89.20427628004393,
+              "peak_m": 85.08814362764602,
+              "score": 9.524429649060227,
+              "direction": "excess"
+            },
+            {
+              "start_m": 308.26560108658003,
+              "end_m": 319.5485072409575,
+              "peak_m": 316.5822783977902,
+              "score": 6.237706629291177,
+              "direction": "excess"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "E3_multi_pass": {
+    "summary": {
+      "passes_vs_f1": {
+        "1": 0.75,
+        "2": 1.0,
+        "3": 1.0,
+        "4": 1.0,
+        "6": 1.0
+      },
+      "final_f1": 1.0,
+      "final_precision": 1.0,
+      "final_recall": 1.0,
+      "bin_size_m": 5.0
+    },
+    "detail": {
+      "curve": {
+        "1": {
+          "tp": 3,
+          "fp": 2,
+          "fn": 0,
+          "precision": 0.6,
+          "recall": 1.0,
+          "f1": 0.7499999999999999,
+          "mean_localization_error_m": 11.666666666666666,
+          "roc_auc": null,
+          "n_detections": 5
+        },
+        "2": {
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 10.0,
+          "roc_auc": null,
+          "n_detections": 3
+        },
+        "3": {
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 8.333333333333334,
+          "roc_auc": null,
+          "n_detections": 3
+        },
+        "4": {
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 11.666666666666666,
+          "roc_auc": null,
+          "n_detections": 3
+        },
+        "6": {
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 11.666666666666666,
+          "roc_auc": null,
+          "n_detections": 3
+        }
+      },
+      "detections": [
+        {
+          "start_m": 80.0,
+          "end_m": 95.0,
+          "peak_m": 87.5,
+          "score": 9.728760733976156,
+          "direction": "excess"
+        },
+        {
+          "start_m": 195.0,
+          "end_m": 215.0,
+          "peak_m": 207.5,
+          "score": 2.8965869163610263,
+          "direction": "attenuation"
+        },
+        {
+          "start_m": 315.0,
+          "end_m": 325.0,
+          "peak_m": 322.5,
+          "score": 6.114964185793742,
+          "direction": "excess"
+        }
+      ],
+      "coverage_median": 6.0
+    }
+  },
+  "E4_modal_shift": {
+    "summary": {
+      "true_baseline_hz": 6.2,
+      "estimated_baseline_hz": 6.077,
+      "baseline_per_pass_std_hz": 0.892,
+      "true_damaged_hz": 5.704,
+      "estimated_damaged_hz": 5.732,
+      "true_shift_frac": -0.08,
+      "estimated_shift_frac": -0.0569,
+      "alarm_at_2pct": true,
+      "passes_blocked_by_cadence_harmonics": 7,
+      "passes_used": 9,
+      "single_pass_shift_spread_frac": 0.0297
+    },
+    "detail": {
+      "baseline_readings_hz": [
+        6.046,
+        6.123,
+        6.077,
+        6.062,
+        8.307
+      ],
+      "damaged_readings_hz": [
+        5.754,
+        5.766,
+        5.709,
+        5.33
+      ],
+      "baseline_damping": [
+        0.0312,
+        0.051,
+        0.0306,
+        0.0625,
+        0.4167
+      ]
+    }
+  },
+  "E5_robustness": {
+    "summary": {
+      "fs=50Hz": 0.5,
+      "fs=100Hz": 0.8,
+      "fs=200Hz": 0.857,
+      "carry=hand": 0.857,
+      "carry=pocket": 0.857,
+      "carry=backpack": 1.0,
+      "gps_noise=1m": 0.857,
+      "gps_noise=3m": 0.857,
+      "gps_noise=8m": 0.0,
+      "sensor_noise=0.06": 0.857,
+      "sensor_noise=0.2": 1.0,
+      "sensor_noise=0.5": 0.857
+    },
+    "detail": {
+      "rows": [
+        {
+          "variant": "fs=50Hz",
+          "tp": 1,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "recall": 0.3333333333333333,
+          "f1": 0.5,
+          "mean_localization_error_m": 2.4499857139737458,
+          "roc_auc": null
+        },
+        {
+          "variant": "fs=100Hz",
+          "tp": 2,
+          "fp": 0,
+          "fn": 1,
+          "precision": 1.0,
+          "recall": 0.6666666666666666,
+          "f1": 0.8,
+          "mean_localization_error_m": 7.945242921692255,
+          "roc_auc": null
+        },
+        {
+          "variant": "fs=200Hz",
+          "tp": 3,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.75,
+          "recall": 1.0,
+          "f1": 0.8571428571428571,
+          "mean_localization_error_m": 5.615310600020261,
+          "roc_auc": null
+        },
+        {
+          "variant": "carry=hand",
+          "tp": 3,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.75,
+          "recall": 1.0,
+          "f1": 0.8571428571428571,
+          "mean_localization_error_m": 5.615310600020261,
+          "roc_auc": null
+        },
+        {
+          "variant": "carry=pocket",
+          "tp": 3,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.75,
+          "recall": 1.0,
+          "f1": 0.8571428571428571,
+          "mean_localization_error_m": 4.726541577595564,
+          "roc_auc": null
+        },
+        {
+          "variant": "carry=backpack",
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 6.967819227885315,
+          "roc_auc": null
+        },
+        {
+          "variant": "gps_noise=1m",
+          "tp": 3,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.75,
+          "recall": 1.0,
+          "f1": 0.8571428571428571,
+          "mean_localization_error_m": 0.9850187311136978,
+          "roc_auc": null
+        },
+        {
+          "variant": "gps_noise=3m",
+          "tp": 3,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.75,
+          "recall": 1.0,
+          "f1": 0.8571428571428571,
+          "mean_localization_error_m": 5.615310600020261,
+          "roc_auc": null
+        },
+        {
+          "variant": "gps_noise=8m",
+          "tp": 0,
+          "fp": 4,
+          "fn": 3,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "mean_localization_error_m": null,
+          "roc_auc": null
+        },
+        {
+          "variant": "sensor_noise=0.06",
+          "tp": 3,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.75,
+          "recall": 1.0,
+          "f1": 0.8571428571428571,
+          "mean_localization_error_m": 5.615310600020261,
+          "roc_auc": null
+        },
+        {
+          "variant": "sensor_noise=0.2",
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "mean_localization_error_m": 7.67225581656469,
+          "roc_auc": null
+        },
+        {
+          "variant": "sensor_noise=0.5",
+          "tp": 3,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.75,
+          "recall": 1.0,
+          "f1": 0.8571428571428571,
+          "mean_localization_error_m": 5.194420785881429,
+          "roc_auc": null
+        }
+      ]
+    }
+  }
+}

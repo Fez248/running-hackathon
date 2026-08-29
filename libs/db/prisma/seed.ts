@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import { confidence, gridKey } from '@sidewalk/core';
-
-const prisma = new PrismaClient();
+import { prisma } from '../src/client';
 
 /** Berlin Mitte, a walkable demo area for the hackathon. */
 const CENTER = { lat: 52.5208, lng: 13.4095 };
