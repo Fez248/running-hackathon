@@ -26,32 +26,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # A push's diff needs the commit before it; workflow_dispatch does not
-          # look at history at all.
-          fetch-depth: ${{ github.event_name == 'push' && 2 || 1 }}
+          # A push's diff spans the whole pushed range, which may be any depth.
+          fetch-depth: ${{ github.event_name == 'push' && 0 || 1 }}
 
       - name: Select recordings
         id: select
         env:
           EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
           INPUT_RECORDING: ${{ inputs.recording }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "push" ]; then
-            # Files this push added or modified under recordings/. `git show`
-            # covers the common single-commit push and needs no `before` sha,
-            # which is unusable on a branch's first push anyway.
-            git show --pretty=format: --name-only --diff-filter=AM "$GITHUB_SHA" \
-              | { grep -E '^recordings/' || true; } > selected.txt
+            # The whole pushed range, so a multi-commit push and a merge of a
+            # branch that added recordings are both covered. A branch's first
+            # push has no usable `before` sha, so fall back to the tip commit
+            # against its first parent — which is also what makes a merge
+            # commit list the merged branch's files rather than nothing.
+            if [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              git diff --name-only --diff-filter=AM "$BEFORE" "$GITHUB_SHA" > selected.txt
+            else
+              git show --first-parent --pretty=format: --name-only --diff-filter=AM \
+                "$GITHUB_SHA" > selected.txt
+            fi
           elif [ -n "$INPUT_RECORDING" ]; then
             path="recordings/$(basename "$INPUT_RECORDING")"
             test -e "$path" || { echo "::error::no such recording: $path"; exit 1; }
             echo "$path" > selected.txt
           else
-            find recordings -mindepth 1 -maxdepth 1 ! -name README.md > selected.txt
+            find recordings -mindepth 1 -maxdepth 1 > selected.txt
           fi
-          # READMEs and other prose are not captures.
-          { grep -vE '\.md$' selected.txt || true; } | sort -u > recordings.txt
+          # A recording is one entry directly under recordings/: a `.zip`, or a
+          # directory of CSVs whose individual files a diff lists separately —
+          # scanning those one by one would feed `Location.csv` to the scanner
+          # as if it were a capture. READMEs and other prose are not captures.
+          { grep -E '^recordings/[^/]' selected.txt || true; } \
+            | sed -E 's|^(recordings/[^/]+).*|\1|' \
+            | { grep -vE '\.md$' || true; } | sort -u > recordings.txt
           echo "count=$(wc -l < recordings.txt)" >> "$GITHUB_OUTPUT"
           echo 'Selected:'; cat recordings.txt
 
