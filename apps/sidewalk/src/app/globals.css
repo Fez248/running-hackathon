@@ -349,3 +349,62 @@ button:disabled {
   pointer-events: none;
   box-shadow: inset 0 0 110px rgba(14, 10, 4, 0.85);
 }
+
+/* Milestone celebration: decorative overlay, never in the way of a tap. */
+.milestone-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.milestone-confetti {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.milestone-emoji {
+  position: absolute;
+  top: 55%;
+  font-size: 64px;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 6px 14px rgba(4, 10, 18, 0.6));
+  animation: milestone-pop 1.8s ease-out forwards;
+}
+
+@keyframes milestone-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+  45% {
+    transform: translate(-50%, -70%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -220%) scale(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .milestone-emoji {
+    animation: milestone-fade 1.8s ease-out forwards;
+  }
+
+  @keyframes milestone-fade {
+    0%,
+    60% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+}
