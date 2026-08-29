@@ -64,6 +64,21 @@ h1 {
   margin: 0 0 4px;
 }
 
+h2 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+h3 {
+  font-size: 13px;
+  margin: 12px 0 4px;
+}
+
+:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
 .tagline {
   color: var(--muted);
   font-size: 13px;
@@ -78,7 +93,8 @@ h1 {
   background: #12151c;
 }
 
-label {
+label,
+.field-label {
   display: block;
   font-size: 12px;
   color: var(--muted);
@@ -136,6 +152,9 @@ button:disabled {
 .chip[data-active='true'] {
   border-color: var(--accent);
   color: var(--accent);
+  /* Colour alone would be the only cue that a filter is on. */
+  background: rgba(74, 222, 128, 0.14);
+  font-weight: 600;
 }
 
 .report {
@@ -218,6 +237,16 @@ button:disabled {
 .toggle input {
   width: auto;
   accent-color: var(--accent);
+}
+
+.toggle:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Keeps the announcement region in the tree without leaving an empty gap. */
+.live-status:empty {
+  display: none;
 }
 
 .interim {

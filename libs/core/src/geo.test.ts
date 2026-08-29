@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { boundsAround, distanceMeters, gridKey } from './geo';
+import { boundsAround, clampBounds, distanceMeters, gridKey } from './geo';
+import { boundsSchema } from './obstacles';
 import { confidence, passabilityForProfile } from './scoring';
 
 describe('distanceMeters', () => {
@@ -21,6 +22,62 @@ describe('boundsAround', () => {
     expect(b.maxLat).toBeGreaterThan(52.52);
     expect(b.minLng).toBeLessThan(13.4);
     expect(b.maxLng).toBeGreaterThan(13.4);
+  });
+});
+
+describe('clampBounds', () => {
+  it('leaves a valid viewport untouched', () => {
+    const viewport = { minLat: 52.5, maxLat: 52.54, minLng: 13.39, maxLng: 13.43 };
+    expect(clampBounds(viewport)).toEqual(viewport);
+  });
+
+  it('accepts the unwrapped world bounds a zoomed-out map reports', () => {
+    // Leaflet returns longitudes past ±180 once the whole world is visible.
+    const clamped = clampBounds({
+      minLat: -89.9,
+      maxLat: 89.9,
+      minLng: -227.8,
+      maxLng: 227.8,
+    });
+    expect(clamped).toEqual({ minLat: -89.9, maxLat: 89.9, minLng: -180, maxLng: 180 });
+    expect(boundsSchema.safeParse(clamped).success).toBe(true);
+  });
+
+  it('wraps a viewport panned into the next world copy onto its real longitudes', () => {
+    expect(clampBounds({ minLat: 10, maxLat: 12, minLng: 190, maxLng: 210 })).toEqual({
+      minLat: 10,
+      maxLat: 12,
+      minLng: -170,
+      maxLng: -150,
+    });
+    expect(clampBounds({ minLat: 10, maxLat: 12, minLng: -210, maxLng: -190 })).toEqual({
+      minLat: 10,
+      maxLat: 12,
+      minLng: 150,
+      maxLng: 170,
+    });
+  });
+
+  it('orders in-range edges that arrive reversed', () => {
+    expect(clampBounds({ minLat: 12, maxLat: 10, minLng: 13.43, maxLng: 13.39 })).toEqual({
+      minLat: 10,
+      maxLat: 12,
+      minLng: 13.39,
+      maxLng: 13.43,
+    });
+  });
+
+  it('widens a viewport straddling the antimeridian instead of truncating it', () => {
+    // One min/max interval cannot express 170..-170, and dropping either half
+    // would hide reports that are on screen.
+    for (const straddling of [
+      { minLat: 10, maxLat: 12, minLng: 170, maxLng: 190 },
+      { minLat: 10, maxLat: 12, minLng: -190, maxLng: -170 },
+    ]) {
+      const clamped = clampBounds(straddling);
+      expect(clamped).toEqual({ minLat: 10, maxLat: 12, minLng: -180, maxLng: 180 });
+      expect(boundsSchema.safeParse(clamped).success).toBe(true);
+    }
   });
 });
 

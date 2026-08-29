@@ -214,9 +214,11 @@ export function MapWorkspace() {
           onToggleVoice={toggleVoice}
           onTypedReport={voice.submitTyped}
           voiceStatus={voiceStatus}
+          fogError={coverage.error?.message ?? null}
         />
 
         <div className="card">
+          <h2>Filters</h2>
           <label htmlFor="profile">I travel as</label>
           <select
             id="profile"
@@ -230,14 +232,17 @@ export function MapWorkspace() {
             ))}
           </select>
 
-          <label>Filter features</label>
-          <div className="chips">
+          <span className="field-label" id="kind-filter-label">
+            Filter features
+          </span>
+          <div className="chips" role="group" aria-labelledby="kind-filter-label">
             {OBSTACLE_KINDS.map((kind) => (
               <button
                 key={kind}
                 type="button"
                 className="chip"
                 data-active={kinds.includes(kind)}
+                aria-pressed={kinds.includes(kind)}
                 onClick={() => toggleKind(kind)}
               >
                 {OBSTACLE_LABELS[kind]}
@@ -254,10 +259,22 @@ export function MapWorkspace() {
         />
 
         <div className="card">
-          <strong>
-            {reports.isPending ? 'Loading reports…' : `${markers.length} reports in view`}
-          </strong>
-          {reports.error ? <p className="muted">{reports.error.message}</p> : null}
+          <h2>Reports in view</h2>
+          <p className="muted" role="status">
+            {reports.isPending
+              ? 'Loading reports…'
+              : `${markers.length} ${markers.length === 1 ? 'report' : 'reports'} in view`}
+          </p>
+          {reports.error ? (
+            <p className="error" role="alert">
+              {reports.error.message}
+            </p>
+          ) : null}
+          {!reports.isPending && !reports.error && !markers.length ? (
+            <p className="muted">
+              Nothing mapped here yet — tap the map to place a report, or pan to another street.
+            </p>
+          ) : null}
           {markers.map((report) => (
             <div className="report" key={report.id}>
               <div>

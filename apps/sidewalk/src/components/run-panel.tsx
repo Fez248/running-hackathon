@@ -26,6 +26,8 @@ interface RunPanelProps {
   onToggleVoice: (enabled: boolean) => void;
   onTypedReport: (text: string) => void;
   voiceStatus: string | null;
+  /** Coverage query failure: the fog is stale, which is otherwise invisible. */
+  fogError?: string | null;
 }
 
 const REJECTION_LABELS: Record<string, string> = {
@@ -49,12 +51,13 @@ export function RunPanel({
   onToggleVoice,
   onTypedReport,
   voiceStatus,
+  fogError = null,
 }: RunPanelProps) {
   const [typed, setTyped] = useState('');
 
   return (
     <div className="card">
-      <strong>Fog of War run</strong>
+      <h2>Fog of War run</h2>
       <p className="muted">
         Precise GPS clears the fog around your path; dictate what you pass and it lands on the map
         at your current position.
@@ -70,21 +73,30 @@ export function RunPanel({
             Start run
           </button>
         )}
-        <span className="badge" data-gps={status.quality}>
+        <span className="badge" data-gps={status.quality} role="status">
           {status.active
             ? `${status.quality} · ${status.accuracyM ? `±${status.accuracyM.toFixed(0)} m` : 'waiting for fix'}`
             : 'GPS off'}
         </span>
       </div>
 
-      <p className="muted">
+      <p className="muted" aria-live="polite">
         {(distanceM / 1000).toFixed(2)} km tracked · {status.fixes} fixes kept · {revealedCells}{' '}
         cells cleared
         {status.active && status.lastRejection
           ? ` · ${REJECTION_LABELS[status.lastRejection] ?? status.lastRejection}`
           : ''}
       </p>
-      {status.error ? <p className="error">{status.error}</p> : null}
+      {status.error ? (
+        <p className="error" role="alert">
+          {status.error}
+        </p>
+      ) : null}
+      {fogError ? (
+        <p className="error" role="alert">
+          Could not load revealed coverage — the fog may be out of date. {fogError}
+        </p>
+      ) : null}
 
       <label className="toggle">
         <input
@@ -106,20 +118,28 @@ export function RunPanel({
         <input
           type="checkbox"
           checked={voice.enabled}
-          disabled={!voice.supported}
+          disabled={!voice.supported || !status.active}
           onChange={(event) => onToggleVoice(event.target.checked)}
         />
         Ambient voice reporting {voice.listening ? '· listening' : ''}
       </label>
 
       <p className="muted">
-        {voice.supported
-          ? 'Audio is only captured while this is on. Recognition runs in your browser’s speech service; only the transcript and your coordinate are stored.'
-          : 'This browser has no Web Speech API (Firefox ships it disabled) — type the report instead.'}
+        {!voice.supported
+          ? 'This browser has no Web Speech API (Firefox ships it disabled) — type the report instead.'
+          : status.active
+            ? 'Audio is only captured while this is on. Recognition runs in your browser’s speech service; only the transcript and your coordinate are stored.'
+            : 'Start a run to dictate reports — an utterance is placed at your latest accepted GPS fix.'}
       </p>
       {voice.interim ? <p className="interim">“{voice.interim}”</p> : null}
-      {voice.error ? <p className="error">{voice.error}</p> : null}
-      {voiceStatus ? <p className="muted">{voiceStatus}</p> : null}
+      {voice.error ? (
+        <p className="error" role="alert">
+          {voice.error}
+        </p>
+      ) : null}
+      <p className="muted live-status" role="status">
+        {voiceStatus}
+      </p>
 
       <form
         className="row"
@@ -131,7 +151,7 @@ export function RunPanel({
         }}
       >
         <input
-          aria-label="Dictate or type a report"
+          aria-label="Type a report"
           placeholder={status.active ? 'e.g. high curb about 15 cm' : 'Start a run to log a report here'}
           value={typed}
           disabled={!status.active}
@@ -144,6 +164,7 @@ export function RunPanel({
 
       {voice.utterances.length ? (
         <div className="utterances">
+          <h3>Logged this run</h3>
           {voice.utterances.map((utterance) => (
             <div className="report" key={utterance.id}>
               <div>“{utterance.transcript}”</div>

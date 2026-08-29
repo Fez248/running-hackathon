@@ -109,6 +109,13 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
       return;
     }
 
+    // A second start without a stop would leave the previous recogniser
+    // running alongside the new one.
+    if (recognitionRef.current) {
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
+    }
+
     const recognition = new Ctor();
     recognition.lang = lang;
     recognition.continuous = true;
@@ -143,6 +150,9 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
 
     // Chrome ends the session after a pause even with continuous = true.
     recognition.onend = () => {
+      // `abort()` ends asynchronously, so a replaced recogniser must not restart
+      // itself off the flag that now belongs to its replacement.
+      if (recognitionRef.current !== recognition) return;
       setInterim('');
       if (wantListeningRef.current) {
         try {
