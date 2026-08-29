@@ -135,6 +135,11 @@ Responses: `200 {"status":"done","findingCount":1,"reportCount":1,"quality":"ok"
 `401 unauthorized`, `404 {"error":"unknown-upload"}`, `413 payload-too-large` (over 512 KiB),
 `503 integration-not-configured`.
 
+A completion is matched against the upload queue *before* anything is written, so a scan for an
+upload the webhook never queued is refused without touching the map. When the worker cannot reach
+this endpoint it emits `{"status":"unreported","reportError":...}` for that upload and carries on
+with the rest of the batch; the lease then expires and the upload is handed out again.
+
 ## Data mapping
 
 `scanToReports()` (`libs/core`) turns a scan into the existing `createReportSchema` shape, so sensor
@@ -154,7 +159,9 @@ voice reports:
   "degraded capture" marker when the quality gate warned.
 - `clientReportId`: `sl:<studyId>:<uploadId>:<index>`, or `sl:<fnv1a64 hex>:<index>` when that would
   exceed the 64-character column. `report.create` upserts on this key, so a worker that retries
-  after a timeout updates its pins instead of duplicating them.
+  after a timeout updates its pins instead of duplicating them. `sl:` is a reserved namespace: the
+  `report.create`/`createMany`/`createFromVoice` procedures reject a client-supplied
+  `clientReportId` with that prefix, so an app client cannot occupy a row a later scan will write.
 
 ## Secret handling
 
@@ -216,13 +223,16 @@ Worker (wherever the Python pipeline runs):
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `SIDEWALK_API_URL` | yes | e.g. `https://sidewalk.example.com` |
+| `SIDEWALK_API_URL` | yes | e.g. `https://sidewalk.example.com`; https only (plain http is accepted for `localhost` alone, since every call carries the worker token) |
 | `SENSOR_LOGGER_WORKER_TOKEN` | yes | must match the web app |
 | `SENSOR_LOGGER_SECRET_CODE` | yes | Study secret, for the Study API download |
 | `SENSOR_LOGGER_POST_FEEDBACK` | no | `true` to post a Markdown report back to the participant |
-| `SENSOR_LOGGER_CLAIM_LIMIT` | no | uploads per cycle, default 5 |
+| `SENSOR_LOGGER_CLAIM_LIMIT` | no | uploads per cycle, default 5, 1-25 |
 | `SENSOR_LOGGER_MAX_DOWNLOAD_BYTES` | no | default 268435456 |
 | `SENSOR_LOGGER_HTTP_TIMEOUT_S` | no | default 120 |
+
+Every numeric variable must be a positive number within its documented range; anything else fails
+startup with `error: <VARIABLE> ...` and exit code 2 rather than a traceback.
 
 Never commit these; use `vercel env add` and the worker host's secret store.
 

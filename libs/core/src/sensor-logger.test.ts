@@ -3,6 +3,7 @@ import {
   authorizeWebhook,
   bridgeScanResultSchema,
   findingReportId,
+  isReservedClientReportId,
   redactWebhookPayload,
   scanToReports,
   secretCodeMatches,
@@ -134,6 +135,12 @@ describe('idempotency keys', () => {
     const id = findingReportId(long, 7);
     expect(id.length).toBeLessThanOrEqual(64);
     expect(id.endsWith(':7')).toBe(true);
+  });
+
+  it('owns the ids it generates, so a client cannot claim them first', () => {
+    expect(isReservedClientReportId(findingReportId(payload, 0))).toBe(true);
+    expect(isReservedClientReportId('sl:anything')).toBe(true);
+    expect(isReservedClientReportId('client-uuid-1')).toBe(false);
   });
 });
 

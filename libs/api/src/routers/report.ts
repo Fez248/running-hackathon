@@ -6,6 +6,7 @@ import {
   createReportSchema,
   gridKey,
   needsReview,
+  isReservedClientReportId,
   parseVoiceReport,
   passabilityForProfile,
   PENDING_REVIEW,
@@ -15,6 +16,17 @@ import {
   voteSchema,
 } from '@sidewalk/core';
 import { createTRPCRouter, protectedProcedure, publicProcedure } from '../trpc';
+
+/**
+ * `clientReportId` is an upsert key, so a client that guessed an integration's
+ * key could occupy the row that integration will later write. Reserved
+ * namespaces are therefore refused at the boundary.
+ */
+function rejectReservedClientReportId(clientReportId: string | undefined): void {
+  if (clientReportId && isReservedClientReportId(clientReportId)) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'clientReportId uses a reserved prefix' });
+  }
+}
 
 export const reportRouter = createTRPCRouter({
   /** Everything visible in the current map viewport. */
@@ -60,6 +72,7 @@ export const reportRouter = createTRPCRouter({
    */
   create: publicProcedure.input(createReportSchema).mutation(async ({ ctx, input }) => {
     const gate = voiceGate(input.source, input.transcript);
+    rejectReservedClientReportId(input.clientReportId);
     const data = {
       lat: input.lat,
       lng: input.lng,
@@ -107,6 +120,7 @@ export const reportRouter = createTRPCRouter({
    * person who has to get past it. `review.queue` picks those up.
    */
   createFromVoice: publicProcedure.input(voiceReportSchema).mutation(async ({ ctx, input }) => {
+    rejectReservedClientReportId(input.clientReportId);
     if (input.clientReportId) {
       const existing = await ctx.prisma.report.findUnique({
         where: { clientReportId: input.clientReportId },
@@ -167,6 +181,7 @@ export const reportRouter = createTRPCRouter({
       const ids: string[] = [];
       for (const report of input.reports) {
         const gate = voiceGate(report.source, report.transcript);
+        rejectReservedClientReportId(report.clientReportId);
         const data = {
           lat: report.lat,
           lng: report.lng,

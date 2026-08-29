@@ -76,6 +76,11 @@ function fakeStore(): SensorLoggerUploadStore & { rows: Row[] } {
       }
       return leased;
     },
+    async isKnown(upload) {
+      return rows.some(
+        (row) => row.studyId === upload.studyId && row.uploadId === upload.uploadId,
+      );
+    },
     async complete(record) {
       const row = rows.find(
         (candidate) => candidate.studyId === record.studyId && candidate.uploadId === record.uploadId,
@@ -309,6 +314,8 @@ describe('POST jobs/complete', () => {
       deps(),
     );
     expect(response.status).toBe(404);
+    // The map must be untouched: an unknown completion is refused before mapping.
+    expect(created).toEqual([]);
   });
 
   it('rejects a completion that is neither a scan nor an error, and a bogus scan', async () => {

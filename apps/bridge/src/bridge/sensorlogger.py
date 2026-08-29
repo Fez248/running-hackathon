@@ -24,13 +24,14 @@ Sidewalk server, to a file, or to a log line.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -54,6 +55,7 @@ DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 HTTP_TIMEOUT_S = 120.0
 # How many uploads one cycle leases. The server caps this at 25.
 DEFAULT_CLAIM_LIMIT = 5
+MAX_CLAIM_LIMIT = 25
 
 REDACTED = "***"
 
@@ -251,6 +253,47 @@ def post_feedback(
         raise SyncError(redact(f"feedback POST failed: {exc.reason}", secret_code)) from None
 
 
+def _positive_int(
+    src: Mapping[str, str], name: str, default: int, *, maximum: int | None = None
+) -> int:
+    raw = src.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise SyncError(f"{name} must be a whole number") from None
+    if value < 1 or (maximum is not None and value > maximum):
+        upper = "" if maximum is None else f" and at most {maximum}"
+        raise SyncError(f"{name} must be at least 1{upper}")
+    return value
+
+
+def _positive_float(src: Mapping[str, str], name: str, default: float) -> float:
+    raw = src.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise SyncError(f"{name} must be a number") from None
+    if not math.isfinite(value) or value <= 0:
+        raise SyncError(f"{name} must be a positive number of seconds")
+    return value
+
+
+def _api_base_url(raw: str) -> str:
+    """Sidewalk base URL. HTTPS only: every call carries the worker bearer token."""
+    url = raw.rstrip("/")
+    parsed = urllib.parse.urlsplit(url)
+    if not parsed.netloc:
+        raise SyncError("SIDEWALK_API_URL must be an absolute URL")
+    local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and local):
+        raise SyncError("SIDEWALK_API_URL must use https (http is allowed only for localhost)")
+    return url
+
+
 @dataclass
 class SyncConfig:
     """Worker configuration; every field comes from the environment."""
@@ -274,13 +317,17 @@ class SyncConfig:
         if missing:
             raise SyncError(f"missing environment variables: {', '.join(missing)}")
         return cls(
-            api_base_url=src["SIDEWALK_API_URL"].rstrip("/"),
+            api_base_url=_api_base_url(src["SIDEWALK_API_URL"]),
             worker_token=src["SENSOR_LOGGER_WORKER_TOKEN"],
             secret_code=src["SENSOR_LOGGER_SECRET_CODE"],
-            claim_limit=int(src.get("SENSOR_LOGGER_CLAIM_LIMIT", DEFAULT_CLAIM_LIMIT)),
+            claim_limit=_positive_int(
+                src, "SENSOR_LOGGER_CLAIM_LIMIT", DEFAULT_CLAIM_LIMIT, maximum=MAX_CLAIM_LIMIT
+            ),
             send_feedback=src.get("SENSOR_LOGGER_POST_FEEDBACK", "").lower() == "true",
-            max_download_bytes=int(src.get("SENSOR_LOGGER_MAX_DOWNLOAD_BYTES", MAX_DOWNLOAD_BYTES)),
-            timeout_s=float(src.get("SENSOR_LOGGER_HTTP_TIMEOUT_S", HTTP_TIMEOUT_S)),
+            max_download_bytes=_positive_int(
+                src, "SENSOR_LOGGER_MAX_DOWNLOAD_BYTES", MAX_DOWNLOAD_BYTES
+            ),
+            timeout_s=_positive_float(src, "SENSOR_LOGGER_HTTP_TIMEOUT_S", HTTP_TIMEOUT_S),
         )
 
 
@@ -372,12 +419,35 @@ def process_upload(
             result, _ = scan_recording(recording, threshold=threshold)
         except (SyncError, OSError, ValueError, zipfile.BadZipFile) as exc:
             message = redact(f"{type(exc).__name__}: {exc}", config.secret_code, config.worker_token)
-            client.complete(study_id, upload_id, error=message)
-            return {"studyId": study_id, "uploadId": upload_id, "status": "failed", "error": message}
+            outcome = {
+                "studyId": study_id,
+                "uploadId": upload_id,
+                "status": "failed",
+                "error": message,
+            }
+            try:
+                client.complete(study_id, upload_id, error=message)
+            except SyncError as report_exc:
+                # The server could not record the failure, so the lease will
+                # expire and the upload be retried. Other claimed uploads still
+                # deserve their turn, so this is an outcome, not an exception.
+                outcome["reportError"] = str(report_exc)
+            return outcome
 
-        response = client.complete(
-            study_id, upload_id, scan=scan_payload(result), bytes_downloaded=size
-        )
+        try:
+            response = client.complete(
+                study_id, upload_id, scan=scan_payload(result), bytes_downloaded=size
+            )
+        except SyncError as exc:
+            return {
+                "studyId": study_id,
+                "uploadId": upload_id,
+                "status": "unreported",
+                "bytes": size,
+                "findings": len(result.findings),
+                "quality": result.quality.verdict,
+                "reportError": str(exc),
+            }
         if config.send_feedback:
             try:
                 post_feedback(

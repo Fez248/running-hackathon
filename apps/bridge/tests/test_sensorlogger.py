@@ -309,6 +309,69 @@ def test_config_from_env_requires_the_credentials_and_parses_options():
     assert config.claim_limit == 3 and config.send_feedback is True
 
 
+def _env(**overrides) -> dict[str, str]:
+    return {
+        "SIDEWALK_API_URL": "https://sidewalk.example",
+        "SENSOR_LOGGER_WORKER_TOKEN": TOKEN,
+        "SENSOR_LOGGER_SECRET_CODE": SECRET,
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"SENSOR_LOGGER_CLAIM_LIMIT": "many"}, "SENSOR_LOGGER_CLAIM_LIMIT"),
+        ({"SENSOR_LOGGER_CLAIM_LIMIT": "0"}, "SENSOR_LOGGER_CLAIM_LIMIT"),
+        # The server contract caps a claim at 25.
+        ({"SENSOR_LOGGER_CLAIM_LIMIT": "26"}, "at most 25"),
+        ({"SENSOR_LOGGER_MAX_DOWNLOAD_BYTES": "-1"}, "SENSOR_LOGGER_MAX_DOWNLOAD_BYTES"),
+        ({"SENSOR_LOGGER_HTTP_TIMEOUT_S": "soon"}, "SENSOR_LOGGER_HTTP_TIMEOUT_S"),
+        ({"SENSOR_LOGGER_HTTP_TIMEOUT_S": "nan"}, "SENSOR_LOGGER_HTTP_TIMEOUT_S"),
+        ({"SENSOR_LOGGER_HTTP_TIMEOUT_S": "0"}, "SENSOR_LOGGER_HTTP_TIMEOUT_S"),
+        # The bearer token would otherwise travel in plaintext.
+        ({"SIDEWALK_API_URL": "http://sidewalk.example"}, "https"),
+        ({"SIDEWALK_API_URL": "sidewalk.example"}, "absolute URL"),
+    ],
+)
+def test_config_rejects_malformed_settings_as_sync_errors(overrides, match):
+    with pytest.raises(SyncError, match=match):
+        SyncConfig.from_env(_env(**overrides))
+
+
+def test_config_allows_plaintext_only_for_a_local_server():
+    assert (
+        SyncConfig.from_env(_env(SIDEWALK_API_URL="http://localhost:3000")).api_base_url
+        == "http://localhost:3000"
+    )
+
+
+def test_a_completion_outage_does_not_abandon_the_rest_of_the_batch(tmp_path):
+    class NoCompletions(FakeHttp):
+        def __call__(self, request, timeout=None):  # noqa: ANN001
+            if request.full_url.endswith("/jobs/complete"):
+                raise urllib.error.HTTPError(request.full_url, 502, "down", {}, None)  # type: ignore[arg-type]
+            return super().__call__(request, timeout)
+
+    # One upload scans, one fails to download: both completion paths hit the outage.
+    http = NoCompletions(
+        recording=_recording_zip(tmp_path),
+        uploads=[{"studyId": "s1", "uploadId": "u1"}, {"studyId": "s1", "uploadId": "u2"}],
+    )
+    scanned = sync_once(_config(), opener=http)
+
+    assert [o["uploadId"] for o in scanned] == ["u1", "u2"]
+    # Unreported, so the lease expires and the server hands the upload out again.
+    assert all(o["status"] == "unreported" for o in scanned)
+    assert all("HTTP 502" in str(o["reportError"]) for o in scanned)
+
+    http.download_error = urllib.error.URLError("refused")
+    http.claim_calls = 0
+    failed = sync_once(_config(), opener=http)
+    assert [o["status"] for o in failed] == ["failed", "failed"]
+    assert all("HTTP 502" in str(o["reportError"]) for o in failed)
+
+
 def test_feedback_failure_does_not_undo_a_recorded_scan(tmp_path):
     class NoFeedback(FakeHttp):
         def __call__(self, request, timeout=None):  # noqa: ANN001

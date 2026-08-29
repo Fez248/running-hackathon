@@ -109,6 +109,18 @@ function fnv1a(text: string): string {
 }
 
 /**
+ * `Report.clientReportId` namespace owned by this integration. Client-submitted
+ * ids are refused in it, so an app client cannot pre-create (and thereby hijack,
+ * since creation upserts) the row a future scan will write.
+ */
+export const SENSOR_REPORT_ID_PREFIX = 'sl:';
+
+/** Whether a client-supplied `clientReportId` trespasses on a reserved namespace. */
+export function isReservedClientReportId(clientReportId: string): boolean {
+  return clientReportId.startsWith(SENSOR_REPORT_ID_PREFIX);
+}
+
+/**
  * Idempotency key for a report created from a finding. Reuses `Report.clientReportId`
  * (unique) so replaying a scan upserts instead of duplicating pins on the map.
  * Identifiers long enough to overflow the 64-character column collapse to a
@@ -118,9 +130,9 @@ export function findingReportId(
   payload: { studyId: string; uploadId: string },
   findingIndex: number,
 ): string {
-  const readable = `sl:${payload.studyId}:${payload.uploadId}:${findingIndex}`;
+  const readable = `${SENSOR_REPORT_ID_PREFIX}${payload.studyId}:${payload.uploadId}:${findingIndex}`;
   if (readable.length <= 64) return readable;
-  return `sl:${fnv1a(uploadKey(payload))}:${findingIndex}`;
+  return `${SENSOR_REPORT_ID_PREFIX}${fnv1a(uploadKey(payload))}:${findingIndex}`;
 }
 
 /** Bridge finding polarity -> label, as emitted by `bridge.scan.DIRECTION_LABELS`. */

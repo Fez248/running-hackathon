@@ -77,6 +77,14 @@ export function prismaSensorLoggerStore(client: PrismaClientLike = prisma): Sens
       return claimed;
     },
 
+    async isKnown(upload): Promise<boolean> {
+      const row = await client.sensorLoggerUpload.findUnique({
+        where: { studyId_uploadId: upload },
+        select: { id: true },
+      });
+      return row !== null;
+    },
+
     async complete(record: CompletionRecord): Promise<boolean> {
       const { count } = await client.sensorLoggerUpload.updateMany({
         where: { studyId: record.studyId, uploadId: record.uploadId },

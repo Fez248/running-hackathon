@@ -105,6 +105,8 @@ export interface SensorLoggerUploadStore {
   enqueue(upload: { studyId: string; uploadId: string }): Promise<EnqueueResult>;
   /** Lease up to `limit` uploads, reclaiming leases older than `staleBefore`. */
   claim(options: { limit: number; staleBefore: Date; maxAttempts: number }): Promise<ClaimedUpload[]>;
+  /** Whether this upload was ever webhooked. Checked before a scan touches the map. */
+  isKnown(upload: { studyId: string; uploadId: string }): Promise<boolean>;
   /** Close out a leased upload. `false` when no such upload is known. */
   complete(record: CompletionRecord): Promise<boolean>;
 }
@@ -247,6 +249,12 @@ export async function handleSensorLoggerCompletion(
   if (!parsed.success) return json({ error: 'invalid-payload', issues: parsed.error.issues }, 400);
 
   const { studyId, uploadId, scan, bytes, error } = parsed.data;
+  // Checked before anything is written: a completion for an upload nobody
+  // webhooked must not leave reports on the map behind its 404.
+  if (!(await deps.store.isKnown({ studyId, uploadId }))) {
+    return json({ error: 'unknown-upload' }, 404);
+  }
+
   if (!scan) {
     const known = await deps.store.complete({
       studyId,

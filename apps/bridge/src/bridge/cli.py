@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -95,30 +97,31 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     """Process recordings uploaded to a Sensor Logger Study (see docs/SENSOR_LOGGER_SYNC.md)."""
+    failures = 0
     try:
         config = SyncConfig.from_env()
         if args.limit:
             config.claim_limit = args.limit
-        if args.poll is None:
-            cycles = [sync_once(config, threshold=args.threshold)]
-        else:
-            cycles = list(
-                sync_forever(
-                    config,
-                    args.poll,
-                    max_cycles=args.max_cycles,
-                    threshold=args.threshold,
-                )
+        # Lazily: with --poll and no --max-cycles the stream never ends, so each
+        # cycle is printed as it arrives rather than collected.
+        cycles: Iterable[list[dict[str, Any]]] = (
+            [sync_once(config, threshold=args.threshold)]
+            if args.poll is None
+            else sync_forever(
+                config,
+                args.poll,
+                max_cycles=args.max_cycles,
+                threshold=args.threshold,
             )
+        )
+        for outcomes in cycles:
+            for outcome in outcomes:
+                print(json.dumps(outcome), flush=True)
+                failures += outcome["status"] != "done"
     except SyncError as exc:
         print(f"error: {exc}")
         return 2
 
-    failures = 0
-    for outcomes in cycles:
-        for outcome in outcomes:
-            print(json.dumps(outcome))
-            failures += outcome["status"] == "failed"
     return 1 if failures else 0
 
 
