@@ -188,6 +188,45 @@ Privacy and support notes, surfaced in the UI as well:
   with `CLLocationUpdate.liveUpdates` is the direct counterpart of the browser watch, and would
   additionally allow background updates a web app cannot get.
 
+## Fleet passability API
+
+Routing engines do not want the map's reports, they want a verdict per waypoint. `public.passability`
+answers "can this profile get through here?" for one point, `public.passabilityBatch` for a whole
+route leg (≤ 50 waypoints, normally two queries in total). Both are tRPC queries, so reachable over
+plain HTTP GET:
+
+```bash
+curl -sG http://localhost:3000/api/trpc/public.passability \
+  --data-urlencode 'input={"json":{"lat":52.5200,"lng":13.4050,"radiusM":40,"profile":"WHEELCHAIR"}}'
+```
+
+Each waypoint comes back as `{ lat, lng, verdict, confidence, sampleSize, lastCapturedAt, surveyed }`
+and nothing else — no transcripts, contributor identities, report ids or traces leave the map, and
+every procedure in the router is read-only.
+
+How the verdict is reached (`libs/core/src/passability.ts`):
+
+- Every report within the radius is weighted by its own confidence × freshness × proximity — full
+  weight for the first 30 days, decaying to 0.35 by 180 days, halved at the edge of the radius.
+- Observations under the 0.25 trust floor are ignored so one unconfirmed report with poor GPS cannot
+  close a street for a fleet; they still count towards `sampleSize`.
+- The worst remaining verdict wins, evaluated **per profile**: a 5 cm kerb is `PASSABLE` for a
+  `COURIER` and `DIFFICULT` for a `WHEELCHAIR`, via the same `passabilityForProfile` rules the map uses.
+  A report whose author did not judge passability does not compete in that comparison — it is not
+  evidence against the street — but its measurements still can rule the street out for a profile.
+- `surveyed` separates the two kinds of `UNKNOWN`: `surveyed: true` means someone walked here (a
+  report or revealed fog) and flagged nothing, `surveyed: false` means the map has never seen the
+  place. A planner should treat only the second as a blind spot. A resolved or rejected report no
+  longer says anything about passability, but it still proves someone was here, so it keeps counting
+  towards `surveyed` while staying out of the verdict.
+
+`radiusM` is capped at 200 m per waypoint, so no single call can scan a city. A leg is read with one
+query per table while that read stays under its row cap; if a dense stretch fills it, each waypoint is
+re-read against its own radius and paged to the end, so a busy neighbourhood cannot starve the
+waypoints after it and no row inside a radius is dropped before the distance filter runs. Those
+per-waypoint reads run one after another and are shared between repeated waypoints, so a leg that
+visits the same corner several times pays for it once.
+
 ## Stack
 
 TypeScript · Next.js 15 / React 19 · tRPC 11 · Prisma 6 + SQLite · Leaflet + OpenStreetMap ·
