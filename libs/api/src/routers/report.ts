@@ -9,7 +9,7 @@ import {
   type Passability,
   voteSchema,
 } from '@sidewalk/core';
-import { createTRPCRouter, publicProcedure } from '../trpc';
+import { createTRPCRouter, protectedProcedure, publicProcedure } from '../trpc';
 
 export const reportRouter = createTRPCRouter({
   /** Everything visible in the current map viewport. */
@@ -114,20 +114,20 @@ export const reportRouter = createTRPCRouter({
       return { ids, count: ids.length };
     }),
 
-  /** Confirm or dispute someone else's report. */
-  vote: publicProcedure.input(voteSchema).mutation(async ({ ctx, input }) => {
+  /**
+   * Confirm or dispute someone else's report. Requires an identity: one vote
+   * per contributor per report, otherwise a single caller could bury a report
+   * by repeating the call.
+   */
+  vote: protectedProcedure.input(voteSchema).mutation(async ({ ctx, input }) => {
     const report = await ctx.prisma.report.findUnique({ where: { id: input.reportId } });
     if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
 
-    if (ctx.user) {
-      await ctx.prisma.vote.upsert({
-        where: { reportId_userId: { reportId: input.reportId, userId: ctx.user.id } },
-        update: { agree: input.agree },
-        create: { reportId: input.reportId, userId: ctx.user.id, agree: input.agree },
-      });
-    } else {
-      await ctx.prisma.vote.create({ data: { reportId: input.reportId, agree: input.agree } });
-    }
+    await ctx.prisma.vote.upsert({
+      where: { reportId_userId: { reportId: input.reportId, userId: ctx.user.id } },
+      update: { agree: input.agree },
+      create: { reportId: input.reportId, userId: ctx.user.id, agree: input.agree },
+    });
 
     const [agreeCount, disagreeCount] = await Promise.all([
       ctx.prisma.vote.count({ where: { reportId: input.reportId, agree: true } }),
@@ -145,10 +145,25 @@ export const reportRouter = createTRPCRouter({
     });
   }),
 
-  /** Mark a feature fixed: roadworks removed, ramp built, van driven away. */
-  resolve: publicProcedure
+  /**
+   * Mark a feature fixed: roadworks removed, ramp built, van driven away.
+   * Hiding a report from the map is destructive, so only its author may do it.
+   */
+  resolve: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      ctx.prisma.report.update({ where: { id: input.id }, data: { status: 'RESOLVED' } }),
-    ),
+    .mutation(async ({ ctx, input }) => {
+      const report = await ctx.prisma.report.findUnique({ where: { id: input.id } });
+      if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (report.authorId && report.authorId !== ctx.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only the contributor who filed a report can resolve it.',
+        });
+      }
+
+      return ctx.prisma.report.update({
+        where: { id: input.id },
+        data: { status: 'RESOLVED' },
+      });
+    }),
 });

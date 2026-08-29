@@ -10,21 +10,29 @@ import {
   type Profile,
 } from '@sidewalk/core';
 import { api } from '@/trpc/client';
+import type { Selection } from './map-workspace';
 
 interface ReportFormProps {
-  pin: { lat: number; lng: number } | null;
+  /** Where the report will be filed: a map tap or a GPS fix, never a mix. */
+  selection: Selection | null;
   profile: Profile;
+  onSelect: (selection: Selection) => void;
   onDone: () => void;
 }
 
 /** One-tap-ish capture: pick a spot on the map (or use GPS), choose a kind, send. */
-export function ReportForm({ pin, profile, onDone }: ReportFormProps) {
+export function ReportForm({ selection, profile, onSelect, onDone }: ReportFormProps) {
   const utils = api.useUtils();
   const [kind, setKind] = useState<ObstacleKind>('CURB');
   const [passability, setPassability] = useState<Passability>('DIFFICULT');
   const [heightCm, setHeightCm] = useState('');
   const [note, setNote] = useState('');
-  const [gps, setGps] = useState<{ lat: number; lng: number; accuracyM?: number } | null>(null);
+  /**
+   * Idempotency key for the draft, not for the attempt: retrying after a failed
+   * or ambiguous response must reuse it so the server dedupes instead of
+   * inserting a second report. It only rotates once a draft is accepted.
+   */
+  const [draftId, setDraftId] = useState(() => crypto.randomUUID());
 
   const create = api.report.create.useMutation({
     onSuccess: async () => {
@@ -32,19 +40,18 @@ export function ReportForm({ pin, profile, onDone }: ReportFormProps) {
       await utils.stats.summary.invalidate();
       setNote('');
       setHeightCm('');
-      setGps(null);
+      setDraftId(crypto.randomUUID());
       onDone();
     },
   });
 
-  const target = pin ?? gps;
-
   const useMyLocation = () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition((position) =>
-      setGps({
+      onSelect({
         lat: position.coords.latitude,
         lng: position.coords.longitude,
+        source: 'gps',
         accuracyM: position.coords.accuracy,
       }),
     );
@@ -55,24 +62,28 @@ export function ReportForm({ pin, profile, onDone }: ReportFormProps) {
       className="card"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!target) return;
+        if (!selection) return;
         create.mutate({
-          lat: target.lat,
-          lng: target.lng,
+          lat: selection.lat,
+          lng: selection.lng,
           kind,
           passability,
           heightCm: heightCm ? Number(heightCm) : undefined,
           note: note || undefined,
           capturedByProfile: profile,
-          accuracyM: gps?.accuracyM,
-          clientReportId: crypto.randomUUID(),
+          accuracyM: selection.accuracyM,
+          clientReportId: draftId,
         });
       }}
     >
       <strong>Report what you just passed</strong>
       <p className="muted">
-        {target
-          ? `at ${target.lat.toFixed(5)}, ${target.lng.toFixed(5)}`
+        {selection
+          ? `at ${selection.lat.toFixed(5)}, ${selection.lng.toFixed(5)} (${
+              selection.source === 'gps'
+                ? `GPS ±${Math.round(selection.accuracyM ?? 0)} m`
+                : 'map tap'
+            })`
           : 'Tap the map or use your location'}
       </p>
 
@@ -125,7 +136,7 @@ export function ReportForm({ pin, profile, onDone }: ReportFormProps) {
         <button type="button" onClick={useMyLocation}>
           Use my location
         </button>
-        <button className="primary" type="submit" disabled={!target || create.isPending}>
+        <button className="primary" type="submit" disabled={!selection || create.isPending}>
           {create.isPending ? 'Sending…' : 'Send report'}
         </button>
       </div>

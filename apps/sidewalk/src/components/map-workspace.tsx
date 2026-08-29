@@ -28,6 +28,17 @@ export interface Viewport {
   maxLng: number;
 }
 
+/**
+ * The single place a report will be filed. Coordinates and accuracy always come
+ * from the same source, so a map tap never inherits a stale GPS accuracy.
+ */
+export interface Selection {
+  lat: number;
+  lng: number;
+  source: 'map' | 'gps';
+  accuracyM?: number;
+}
+
 const DEFAULT_VIEWPORT: Viewport = {
   minLat: DEFAULT_CENTER.lat - 0.02,
   maxLat: DEFAULT_CENTER.lat + 0.02,
@@ -39,7 +50,7 @@ export function MapWorkspace() {
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [profile, setProfile] = useState<Profile>('WHEELCHAIR');
   const [kinds, setKinds] = useState<ObstacleKind[]>([]);
-  const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
 
   const reports = api.report.byBounds.useQuery({
     ...viewport,
@@ -60,8 +71,8 @@ export function MapWorkspace() {
       <MapView
         center={DEFAULT_CENTER}
         reports={markers}
-        pin={pin}
-        onPick={setPin}
+        selection={selection}
+        onPick={(coord) => setSelection({ ...coord, source: 'map' })}
         onViewportChange={setViewport}
       />
 
@@ -102,7 +113,12 @@ export function MapWorkspace() {
           </div>
         </div>
 
-        <ReportForm pin={pin} profile={profile} onDone={() => setPin(null)} />
+        <ReportForm
+          selection={selection}
+          profile={profile}
+          onSelect={setSelection}
+          onDone={() => setSelection(null)}
+        />
 
         <div className="card">
           <strong>

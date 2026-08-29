@@ -2,7 +2,7 @@
 
 import { CircleMarker, MapContainer, Popup, TileLayer, useMapEvents } from 'react-leaflet';
 import { OBSTACLE_LABELS, type ObstacleKind, type Passability } from '@sidewalk/core';
-import type { Viewport } from './map-workspace';
+import type { Selection, Viewport } from './map-workspace';
 
 const COLORS: Record<Passability, string> = {
   PASSABLE: '#4ade80',
@@ -24,7 +24,7 @@ export interface MapReport {
 interface MapViewProps {
   center: { lat: number; lng: number };
   reports: MapReport[];
-  pin: { lat: number; lng: number } | null;
+  selection: Selection | null;
   onPick: (coord: { lat: number; lng: number }) => void;
   onViewportChange: (viewport: Viewport) => void;
 }
@@ -50,7 +50,7 @@ function MapEvents({
   return null;
 }
 
-export function MapView({ center, reports, pin, onPick, onViewportChange }: MapViewProps) {
+export function MapView({ center, reports, selection, onPick, onViewportChange }: MapViewProps) {
   return (
     <div className="map-wrap">
       <MapContainer center={[center.lat, center.lng]} zoom={16} scrollWheelZoom>
@@ -86,9 +86,9 @@ export function MapView({ center, reports, pin, onPick, onViewportChange }: MapV
           </CircleMarker>
         ))}
 
-        {pin ? (
+        {selection ? (
           <CircleMarker
-            center={[pin.lat, pin.lng]}
+            center={[selection.lat, selection.lng]}
             radius={10}
             pathOptions={{ color: '#60a5fa', dashArray: '4' }}
           />

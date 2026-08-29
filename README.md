@@ -23,12 +23,17 @@ Libraries are shipped as TypeScript source and compiled by the consuming app
 
 ```bash
 npm install
-cp .env.example .env
+npm run env:init      # creates the single repo-root .env from .env.example
 npm run db:generate && npm run db:push && npm run db:seed
 npm run dev            # http://localhost:3000
 ```
 
 Or: `npm run setup && npm run dev`.
+
+Configuration lives in one place: the repository-root `.env`. Prisma commands load it through
+`dotenv-cli` and Next loads it in `apps/sidewalk/next.config.mjs`, so `DATABASE_URL` resolves
+identically from the root, `libs/db` and `apps/sidewalk`. `file:./dev.db` is relative to
+`libs/db/prisma/schema.prisma`, i.e. `libs/db/prisma/dev.db`.
 
 ## Scripts
 
