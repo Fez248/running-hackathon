@@ -84,6 +84,19 @@ describe('scanIngestSchema', () => {
     expect(scan({ source: '/' }).source).toBe('recording');
   });
 
+  it('rejects two findings sharing one index', () => {
+    expect(
+      scanIngestSchema.safeParse({
+        source: 'demo_pass',
+        format: 'csv',
+        quality: QUALITY,
+        cadenceSpm: 100,
+        findings: [FINDING, { ...FINDING, peakM: 60 }],
+        clientScanId: 'scan-dup',
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects a finding confidence outside 0..1', () => {
     expect(
       scanIngestSchema.safeParse({

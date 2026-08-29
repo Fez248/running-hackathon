@@ -88,7 +88,18 @@ export const scanIngestSchema = z.object({
   format: z.string().min(1).max(40),
   quality: captureQualitySchema,
   cadenceSpm: z.number().min(0).max(400),
-  findings: z.array(sensorFindingSchema).max(500),
+  /**
+   * A finding's index is its identity within the scan, so two findings may not
+   * share one: their reports would be the same report, and the second would
+   * read as an outside collision rather than as a malformed payload.
+   */
+  findings: z
+    .array(sensorFindingSchema)
+    .max(500)
+    .refine(
+      (findings) => new Set(findings.map((finding) => finding.index)).size === findings.length,
+      { message: 'findings must have distinct index values' },
+    ),
   /** Idempotency key for the whole scan, so a re-upload creates nothing new. */
   clientScanId: z.string().min(1).max(64),
 });
