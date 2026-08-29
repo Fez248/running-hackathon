@@ -1,0 +1,114 @@
+name: process-recordings
+
+# Scan the recordings a push adds to `recordings/` and upload the findings to the
+# Sidewalk Map. `scripts/process_recordings.py` holds the logic (and its tests);
+# this workflow decides *which* recordings to process.
+on:
+  push:
+    paths:
+      - 'recordings/**'
+  workflow_dispatch:
+    inputs:
+      recording:
+        description: 'Recording to process (name in recordings/, or blank for all of them)'
+        required: false
+        type: string
+
+concurrency:
+  group: process-recordings-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    env:
+      SIDEWALK_API_URL: ${{ vars.SIDEWALK_API_URL || 'https://sidewalk-map-gamma.vercel.app' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A push's diff spans the whole pushed range, which may be any depth.
+          fetch-depth: ${{ github.event_name == 'push' && 0 || 1 }}
+
+      - name: Select recordings
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          FIRST_PUSHED: ${{ github.event.commits[0].id }}
+          INPUT_RECORDING: ${{ inputs.recording }}
+        run: |
+          set -euo pipefail
+          exists() { [ -n "${1:-}" ] && git cat-file -e "${1}^{commit}" 2>/dev/null; }
+          if [ "$EVENT" = "push" ]; then
+            # The whole pushed range, so a multi-commit push and a merge of a
+            # branch that added recordings are both covered. A branch's first
+            # push has no `before` to diff from, so start from the parent of the
+            # oldest commit the push carried instead; only if that is missing
+            # too does this fall back to the tip commit against its first parent
+            # (which is what makes a merge commit list the merged branch's files
+            # rather than the empty combined diff).
+            if exists "$BEFORE"; then
+              from="$BEFORE"
+            elif exists "${FIRST_PUSHED}^"; then
+              from="${FIRST_PUSHED}^"
+            else
+              from=""
+            fi
+            if [ -n "$from" ]; then
+              git diff --name-only --diff-filter=AM "$from" "$GITHUB_SHA" > selected.txt
+            else
+              git show --first-parent --pretty=format: --name-only --diff-filter=AM \
+                "$GITHUB_SHA" > selected.txt
+            fi
+          elif [ -n "$INPUT_RECORDING" ]; then
+            path="recordings/$(basename "$INPUT_RECORDING")"
+            test -e "$path" || { echo "::error::no such recording: $path"; exit 1; }
+            echo "$path" > selected.txt
+          else
+            find recordings -mindepth 1 -maxdepth 1 > selected.txt
+          fi
+          # A recording is one entry directly under recordings/: a `.zip`, or a
+          # directory of CSVs whose individual files a diff lists separately —
+          # scanning those one by one would feed `Location.csv` to the scanner
+          # as if it were a capture. READMEs and other prose are not captures.
+          { grep -E '^recordings/[^/]' selected.txt || true; } \
+            | sed -E 's|^(recordings/[^/]+).*|\1|' \
+            | { grep -vE '\.md$' || true; } | sort -u > recordings.txt
+          echo "count=$(wc -l < recordings.txt)" >> "$GITHUB_OUTPUT"
+          echo 'Selected:'; cat recordings.txt
+
+      - name: Guard recording sizes
+        run: |
+          set -euo pipefail
+          while read -r f; do
+            [ -e "$f" ] || { echo "::error::$f is missing from the checkout"; exit 1; }
+            size=$(du -sm "$f" | cut -f1)
+            if [ "$size" -gt 50 ]; then
+              echo "::error file=$f::$f is ${size} MB; recordings must stay under 50 MB (see recordings/README.md)"
+              exit 1
+            fi
+          done < recordings.txt
+
+      - uses: actions/setup-python@v5
+        if: steps.select.outputs.count != '0'
+        with:
+          python-version: '3.11'
+
+      - name: Install bridge
+        if: steps.select.outputs.count != '0'
+        run: pip install -e libs/imukit -e 'apps/bridge[dev]'
+
+      - name: Scan and ingest
+        run: |
+          set -euo pipefail
+          # Runs with no arguments when nothing was selected, so the job still
+          # summarises that there was nothing to do.
+          mapfile -t recs < recordings.txt
+          python3 apps/bridge/scripts/process_recordings.py --out-dir payloads "${recs[@]}"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.select.outputs.count != '0'
+        with:
+          name: recording-payloads
+          path: payloads/*.payload.json
+          if-no-files-found: warn

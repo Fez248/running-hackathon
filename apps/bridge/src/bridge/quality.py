@@ -3,7 +3,9 @@
 The feasibility study (docs/FEASIBILITY.md §E5) found two hard requirements —
 **≥100 Hz IMU** and **GPS error ≲3 m** — plus a soft one: the accelerometer must
 still contain gravity, because the vertical projection is what makes the result
-independent of how the phone is carried.
+independent of how the phone is carried. The gravity test reads m/s² because
+``ingest`` normalises the unit first, so only a stream with no gravity in it at
+all fails here.
 
 A detection run on a recording that fails those checks is not evidence about the
 idea, it is evidence about the recording, so the CLI reports the verdict *before*
@@ -24,9 +26,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from imukit.geo import cumulative_distance
-from imukit.preprocess import G, lowpass
+from imukit.preprocess import G
 
-from .ingest import Recording
+from .ingest import GRAVITY_BAND_G, Recording, dc_magnitude
 
 MIN_FS_HZ = 100.0
 WARN_FS_HZ = 150.0
@@ -36,8 +38,6 @@ MAX_GPS_ERR_M = 3.0
 WARN_GPS_ERR_M = 5.0
 MIN_DURATION_S = 30.0
 MAX_DROPOUT_FRAC = 0.02
-GRAVITY_CUTOFF_HZ = 0.4
-GRAVITY_BAND_G = (0.5, 2.0)
 VERDICTS = ("ok", "degraded", "unusable")
 
 
@@ -49,19 +49,6 @@ def _shock_band_covered(fs: float) -> float:
     """
     lo, hi = SHOCK_BAND_HZ
     return round(float(np.clip((fs / 2.0 - lo) / (hi - lo), 0.0, 1.0)), 6)
-
-
-def _dc_magnitude(accel: np.ndarray, fs: float) -> float:
-    """Median magnitude of the sub-``GRAVITY_CUTOFF_HZ`` component of ``accel``.
-
-    Gait and orientation changes live above that cutoff, so the low-passed norm
-    is ~g for a gravity-carrying stream and ~0 for a linear/user-acceleration
-    one however vigorous the motion — the mean raw norm is not, because hard
-    running averages well above 0.5 g with gravity already removed.
-    """
-    if fs <= 4 * GRAVITY_CUTOFF_HZ or accel.shape[0] < 64:
-        return float(np.linalg.norm(np.mean(accel, axis=0)))
-    return float(np.median(np.linalg.norm(lowpass(accel, fs, GRAVITY_CUTOFF_HZ), axis=1)))
 
 
 @dataclass
@@ -113,7 +100,7 @@ def assess(rec: Recording) -> CaptureQuality:
     dt = np.diff(t)
     dt_med = float(np.median(dt)) if dt.size else 0.0
     fs = 1.0 / dt_med if dt_med > 0 else 0.0
-    dc_mag = _dc_magnitude(rec.trace.accel, fs)
+    dc_mag = dc_magnitude(rec.trace.accel, fs)
     lo_g, hi_g = GRAVITY_BAND_G
     q = CaptureQuality(
         fs_hz=fs,

@@ -36,3 +36,6 @@ __pycache__/
 .venv/
 # generated demo recordings (apps/bridge scan --demo)
 apps/bridge/samples/
+# scan output for recordings/ (produced by CI, uploaded as an artifact)
+payloads/
+*.payload.json
