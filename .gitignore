@@ -1,0 +1,28 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+
+# env
+.env
+.env.local
+.env*.local
+!.env.example
+
+# prisma / sqlite
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+*.tsbuildinfo
+next-env.d.ts
+
+# misc
+.DS_Store
+*.log
+.turbo/
+.vscode/
+.idea/

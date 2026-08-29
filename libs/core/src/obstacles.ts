@@ -1,0 +1,86 @@
+import { z } from 'zod';
+
+/** Kinds of sidewalk features the crowd can report. */
+export const OBSTACLE_KINDS = [
+  'CURB',
+  'STEPS',
+  'ROADWORKS',
+  'CROSSING',
+  'NARROW_PATH',
+  'BLOCKED',
+  'STEEP_SLOPE',
+  'ROUGH_SURFACE',
+] as const;
+export type ObstacleKind = (typeof OBSTACLE_KINDS)[number];
+
+/** How usable a feature is for a wheeled user. */
+export const PASSABILITY = ['PASSABLE', 'DIFFICULT', 'IMPASSABLE', 'UNKNOWN'] as const;
+export type Passability = (typeof PASSABILITY)[number];
+
+/** Who/what the report was captured by or is relevant for. */
+export const PROFILES = ['WHEELCHAIR', 'STROLLER', 'COURIER', 'DELIVERY_ROBOT'] as const;
+export type Profile = (typeof PROFILES)[number];
+
+export const obstacleKindSchema = z.enum(OBSTACLE_KINDS);
+export const passabilitySchema = z.enum(PASSABILITY);
+export const profileSchema = z.enum(PROFILES);
+
+export const latitudeSchema = z.number().min(-90).max(90);
+export const longitudeSchema = z.number().min(-180).max(180);
+
+export const coordinateSchema = z.object({
+  lat: latitudeSchema,
+  lng: longitudeSchema,
+});
+export type Coordinate = z.infer<typeof coordinateSchema>;
+
+/** Payload sent by a runner/rider while moving (kept tiny on purpose). */
+export const createReportSchema = z.object({
+  lat: latitudeSchema,
+  lng: longitudeSchema,
+  kind: obstacleKindSchema,
+  passability: passabilitySchema.default('UNKNOWN'),
+  /** Vertical obstacle size in cm (curb height, step rise). */
+  heightCm: z.number().int().min(0).max(200).optional(),
+  /** Usable path width in cm. */
+  widthCm: z.number().int().min(0).max(1000).optional(),
+  note: z.string().max(280).optional(),
+  photoUrl: z.string().url().optional(),
+  capturedByProfile: profileSchema.optional(),
+  /** GPS accuracy in metres, used to weight confidence. */
+  accuracyM: z.number().min(0).max(500).optional(),
+  clientReportId: z.string().min(1).max(64).optional(),
+});
+export type CreateReportInput = z.infer<typeof createReportSchema>;
+
+export const voteSchema = z.object({
+  reportId: z.string().min(1),
+  agree: z.boolean(),
+});
+
+/** Bounding-box query used by the map viewport. */
+export const boundsSchema = z
+  .object({
+    minLat: latitudeSchema,
+    maxLat: latitudeSchema,
+    minLng: longitudeSchema,
+    maxLng: longitudeSchema,
+    kinds: z.array(obstacleKindSchema).optional(),
+    profile: profileSchema.optional(),
+    limit: z.number().int().min(1).max(1000).default(500),
+  })
+  .refine((b) => b.minLat <= b.maxLat && b.minLng <= b.maxLng, {
+    message: 'Invalid bounds: min values must not exceed max values',
+  });
+export type BoundsInput = z.infer<typeof boundsSchema>;
+
+export const OBSTACLE_LABELS: Record<ObstacleKind, string> = {
+  CURB: 'Curb',
+  STEPS: 'Steps',
+  ROADWORKS: 'Roadworks',
+  CROSSING: 'Crossing',
+  NARROW_PATH: 'Narrow path',
+  BLOCKED: 'Blocked path',
+  STEEP_SLOPE: 'Steep slope',
+  ROUGH_SURFACE: 'Rough surface',
+};

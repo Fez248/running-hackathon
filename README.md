@@ -1,1 +1,52 @@
 # running-hackathon
+
+Monorepo for **Sidewalk Map** — a crowdsourced map of curbs, steps, roadworks and passable
+crossings for wheelchair users, stroller users, couriers and delivery robots, collected by runners
+and riders while they move.
+
+See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for scope, data model, API surface and next
+steps.
+
+## Layout
+
+| Path | Package | What |
+| --- | --- | --- |
+| `apps/sidewalk` | `@sidewalk/web` | Next.js 15 App Router UI + tRPC endpoint |
+| `libs/core` | `@sidewalk/core` | Domain enums, zod schemas, geo + passability/confidence logic |
+| `libs/db` | `@sidewalk/db` | Prisma schema (SQLite), client singleton, seed |
+| `libs/api` | `@sidewalk/api` | tRPC context and routers |
+
+Libraries are shipped as TypeScript source and compiled by the consuming app
+(`transpilePackages`), so a second app in `apps/` reuses them by adding a workspace dependency.
+
+## Quick start
+
+```bash
+npm install
+npm run env:init      # creates the single repo-root .env from .env.example
+npm run db:generate && npm run db:push && npm run db:seed
+npm run dev            # http://localhost:3000
+```
+
+Or: `npm run setup && npm run dev`.
+
+Configuration lives in one place: the repository-root `.env`. Prisma commands load it through
+`dotenv-cli` and Next loads it in `apps/sidewalk/next.config.mjs`, so `DATABASE_URL` resolves
+identically from the root, `libs/db` and `apps/sidewalk`. `file:./dev.db` is relative to
+`libs/db/prisma/schema.prisma`, i.e. `libs/db/prisma/dev.db`.
+
+## Scripts
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Next dev server for `apps/sidewalk` |
+| `npm run build` | Production build |
+| `npm run typecheck` | `tsc --noEmit` in every workspace |
+| `npm run lint` | ESLint (`next/core-web-vitals`) |
+| `npm test` | Vitest unit tests (`libs/core`) |
+| `npm run db:push` / `db:seed` / `db:studio` | Prisma against `libs/db/prisma/dev.db` |
+
+## Stack
+
+TypeScript · Next.js 15 / React 19 · tRPC 11 · Prisma 6 + SQLite · Leaflet + OpenStreetMap ·
+zod · Vitest · npm workspaces

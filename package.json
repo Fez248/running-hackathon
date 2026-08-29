@@ -1,0 +1,35 @@
+{
+  "name": "running-hackathon",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sidewalk Map monorepo \u2014 crowdsourced accessibility mapping of curbs, steps, roadworks and crossings.",
+  "workspaces": [
+    "apps/*",
+    "libs/*"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "env:init": "node scripts/init-env.mjs",
+    "dev": "npm run dev --workspace @sidewalk/web",
+    "build": "npm run build --workspace @sidewalk/web",
+    "start": "npm run start --workspace @sidewalk/web",
+    "lint": "npm run lint --workspace @sidewalk/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @sidewalk/db",
+    "db:push": "npm run db:push --workspace @sidewalk/db",
+    "db:migrate": "npm run db:migrate --workspace @sidewalk/db",
+    "db:seed": "npm run db:seed --workspace @sidewalk/db",
+    "db:studio": "npm run db:studio --workspace @sidewalk/db",
+    "setup": "npm install && npm run env:init && npm run db:generate && npm run db:push && npm run db:seed"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "dotenv-cli": "^7.4.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
