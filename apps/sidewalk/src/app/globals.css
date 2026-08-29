@@ -152,6 +152,9 @@ button:disabled {
 .chip[data-active='true'] {
   border-color: var(--accent);
   color: var(--accent);
+  /* Colour alone would be the only cue that a filter is on. */
+  background: rgba(74, 222, 128, 0.14);
+  font-weight: 600;
 }
 
 .report {

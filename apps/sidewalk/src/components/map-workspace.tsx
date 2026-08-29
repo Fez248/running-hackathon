@@ -214,6 +214,7 @@ export function MapWorkspace() {
           onToggleVoice={toggleVoice}
           onTypedReport={voice.submitTyped}
           voiceStatus={voiceStatus}
+          fogError={coverage.error?.message ?? null}
         />
 
         <div className="card">
@@ -258,12 +259,20 @@ export function MapWorkspace() {
         />
 
         <div className="card">
-          <h2 aria-live="polite">
-            {reports.isPending ? 'Loading reports…' : `${markers.length} reports in view`}
-          </h2>
+          <h2>Reports in view</h2>
+          <p className="muted" role="status">
+            {reports.isPending
+              ? 'Loading reports…'
+              : `${markers.length} ${markers.length === 1 ? 'report' : 'reports'} in view`}
+          </p>
           {reports.error ? (
             <p className="error" role="alert">
               {reports.error.message}
+            </p>
+          ) : null}
+          {!reports.isPending && !reports.error && !markers.length ? (
+            <p className="muted">
+              Nothing mapped here yet — tap the map to place a report, or pan to another street.
             </p>
           ) : null}
           {markers.map((report) => (

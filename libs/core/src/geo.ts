@@ -54,7 +54,12 @@ export function clampBounds(bounds: {
 
   const west = wrapLongitude(bounds.minLng);
   const east = wrapLongitude(bounds.maxLng);
-  if (west > east) return wholeWorld;
+  // Only wrapping can legitimately reverse the edges; edges that were already
+  // in range and out of order are simply swapped.
+  if (west > east) {
+    const wrapped = bounds.minLng !== west || bounds.maxLng !== east;
+    return wrapped ? wholeWorld : { minLat: south, maxLat: north, minLng: east, maxLng: west };
+  }
   return { minLat: south, maxLat: north, minLng: west, maxLng: east };
 }
 

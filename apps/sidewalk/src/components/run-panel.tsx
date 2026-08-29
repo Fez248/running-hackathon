@@ -26,6 +26,8 @@ interface RunPanelProps {
   onToggleVoice: (enabled: boolean) => void;
   onTypedReport: (text: string) => void;
   voiceStatus: string | null;
+  /** Coverage query failure: the fog is stale, which is otherwise invisible. */
+  fogError?: string | null;
 }
 
 const REJECTION_LABELS: Record<string, string> = {
@@ -49,6 +51,7 @@ export function RunPanel({
   onToggleVoice,
   onTypedReport,
   voiceStatus,
+  fogError = null,
 }: RunPanelProps) {
   const [typed, setTyped] = useState('');
 
@@ -87,6 +90,11 @@ export function RunPanel({
       {status.error ? (
         <p className="error" role="alert">
           {status.error}
+        </p>
+      ) : null}
+      {fogError ? (
+        <p className="error" role="alert">
+          Could not load revealed coverage — the fog may be out of date. {fogError}
         </p>
       ) : null}
 
@@ -143,7 +151,7 @@ export function RunPanel({
         }}
       >
         <input
-          aria-label="Dictate or type a report"
+          aria-label="Type a report"
           placeholder={status.active ? 'e.g. high curb about 15 cm' : 'Start a run to log a report here'}
           value={typed}
           disabled={!status.active}
@@ -156,6 +164,7 @@ export function RunPanel({
 
       {voice.utterances.length ? (
         <div className="utterances">
+          <h3>Logged this run</h3>
           {voice.utterances.map((utterance) => (
             <div className="report" key={utterance.id}>
               <div>“{utterance.transcript}”</div>

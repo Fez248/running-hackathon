@@ -58,6 +58,15 @@ describe('clampBounds', () => {
     });
   });
 
+  it('orders in-range edges that arrive reversed', () => {
+    expect(clampBounds({ minLat: 12, maxLat: 10, minLng: 13.43, maxLng: 13.39 })).toEqual({
+      minLat: 10,
+      maxLat: 12,
+      minLng: 13.39,
+      maxLng: 13.43,
+    });
+  });
+
   it('widens a viewport straddling the antimeridian instead of truncating it', () => {
     // One min/max interval cannot express 170..-170, and dropping either half
     // would hide reports that are on screen.
