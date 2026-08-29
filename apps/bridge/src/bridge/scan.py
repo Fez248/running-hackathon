@@ -176,8 +176,10 @@ def default_client_scan_id(result: ScanResult) -> str:
     """Content-addressed id for a scan.
 
     The ingest endpoint deduplicates on this id, so it is derived from what the
-    scan actually says: uploading the same bridge output twice must not create a
-    second scan, while re-running the detector with a different threshold must.
+    scan actually says rather than from how it was produced: two runs that make
+    the same claim about the same route are the same scan, whatever settings
+    they used, and any run whose findings or certificate differ hashes
+    differently. Pass ``--client-scan-id`` to key a scan on something else.
     """
     material = json.dumps(result.as_dict(), sort_keys=True, default=str)
     return "scan-" + hashlib.sha256(material.encode()).hexdigest()[:24]

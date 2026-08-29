@@ -86,7 +86,8 @@ Two rules the seam preserves:
   recording is not laundered into map data.
 - **Re-uploading the same file changes nothing.** `clientScanId` defaults to a content hash
   of the scan and each report is keyed `<clientScanId>:<findingIndex>`, so ingest is
-  idempotent; re-running the detector with a different `--threshold` is a different scan.
+  idempotent; a re-run whose findings or certificate differ hashes differently and is a
+  different scan, while a re-run that reproduces them byte for byte is the same claim.
   Concurrent uploads of one scan converge on the same scan and reports, and a scan and its
   reports are written in one transaction, so a half-imported scan cannot block a retry.
 - **The recording is named, not located.** Only the recording's bare filename travels with
