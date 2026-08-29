@@ -195,9 +195,14 @@ agreement cannot buy away the parser's doubt. Deciding requires an identified co
 anyone can empty is not a quality gate), and the author of a dictation cannot review it — approving
 your own transcript is not a second opinion. Deciding is idempotent by status, so of two reviewers who
 open the same report only the first decides: the second gets `CONFLICT` rather than silently
-overwriting a correction with an approval. Votes arriving alongside a decision are tallied inside a
-transaction that re-reads the report, so a vote in flight cannot push a reviewed report back into the
-queue.
+overwriting a correction with an approval. Voting and deciding each run in a transaction that reads
+the report inside it, so a vote in flight can neither push a reviewed report back into the queue nor
+have its tally overwritten by a decision that read the older counts.
+
+A withheld report is withheld everywhere, not only on the map: `report.byId` returns `NOT_FOUND` for a
+`PENDING_REVIEW` or `REJECTED` report to anyone but its author, since neither a report id nor an account
+is a permission, and the raw transcript is exactly what the queue exists to hold back. Reviewers reach
+those reports through `review.queue`, which is where the reviewing privilege belongs.
 
 Privacy and support notes, surfaced in the UI as well:
 

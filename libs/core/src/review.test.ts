@@ -8,6 +8,7 @@ import {
   reviewedFields,
   reviewQueueSchema,
   voiceGate,
+  withheldFromPublic,
 } from './review';
 
 const parseConfidence = (transcript: string, recognition?: number) => {
@@ -29,6 +30,18 @@ describe('needsReview', () => {
   it('is a floor, not a ceiling', () => {
     expect(needsReview(REVIEW_CONFIDENCE_FLOOR)).toBe(false);
     expect(needsReview(REVIEW_CONFIDENCE_FLOOR - 0.01)).toBe(true);
+  });
+});
+
+describe('withheldFromPublic', () => {
+  it('withholds what the map withholds', () => {
+    expect(withheldFromPublic(PENDING_REVIEW)).toBe(true);
+    expect(withheldFromPublic('REJECTED')).toBe(true);
+  });
+
+  it('leaves published and fixed reports readable', () => {
+    expect(withheldFromPublic('ACTIVE')).toBe(false);
+    expect(withheldFromPublic('RESOLVED')).toBe(false);
   });
 });
 
