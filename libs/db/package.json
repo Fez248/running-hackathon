@@ -15,10 +15,9 @@
     "db:studio": "dotenv -e ../../.env -- prisma studio",
     "typecheck": "tsc -p tsconfig.json"
   },
-  "prisma": {
-    "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts"
-  },
   "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "@prisma/adapter-libsql": "^6.19.3",
     "@prisma/client": "^6.1.0"
   },
   "devDependencies": {
