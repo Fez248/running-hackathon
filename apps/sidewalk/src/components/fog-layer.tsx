@@ -301,7 +301,7 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
       ctx.fillRect(0, 0, size.x, size.y);
       if (mistRef.current) {
         ctx.save();
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = 0.5 * opacity;
         ctx.fillStyle = mistRef.current;
         ctx.fillRect(0, 0, size.x, size.y);
         ctx.restore();
@@ -312,7 +312,7 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
         const noise = tileNoise(tile.q, tile.r);
         // Mostly deepening shadow, with the occasional paler bank of cloud.
         const pale = noise > 0.82;
-        ctx.globalAlpha = pale ? 0.07 + noise * 0.06 : 0.1 + noise * 0.2;
+        ctx.globalAlpha = (pale ? 0.07 + noise * 0.06 : 0.1 + noise * 0.2) * opacity;
         ctx.fillStyle = pale ? 'rgba(226, 232, 240, 1)' : 'rgba(6, 7, 9, 1)';
         hexPath(ctx, tile.cx, tile.cy, hexScreen * (0.86 + noise * 0.14));
         ctx.fill();
