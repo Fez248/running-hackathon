@@ -17,6 +17,7 @@ from bridge.experiments import ROUTE_ANOMALIES
 from bridge.ingest import write_export_dir
 from bridge.synth import SurfaceScenario, simulate_pass
 from bridge.worker import (
+    ScanRequestHandler,
     UploadedFile,
     materialise,
     parse_field,
@@ -130,6 +131,22 @@ def test_scan_upload_of_a_pathless_export_is_the_same_scan_every_time(tmp_path):
 
     assert first["source"] == second["source"] == "walk"
     assert first["clientScanId"] == second["clientScanId"]
+
+
+def test_the_handler_refuses_an_upload_without_the_token_it_was_given():
+    """A worker off loopback is only as safe as the token it checks."""
+    handler = type("Bound", (ScanRequestHandler,), {"token": "s3cret"})
+    unauthorised = handler.__new__(handler)
+    unauthorised.headers = {"authorization": "Bearer wrong"}
+    assert unauthorised._authorised() is False
+
+    authorised = handler.__new__(handler)
+    authorised.headers = {"authorization": "Bearer s3cret"}
+    assert authorised._authorised() is True
+
+    open_worker = ScanRequestHandler.__new__(ScanRequestHandler)
+    open_worker.headers = {}
+    assert open_worker._authorised() is True
 
 
 def test_parse_field_reads_the_recording_label(tmp_path):

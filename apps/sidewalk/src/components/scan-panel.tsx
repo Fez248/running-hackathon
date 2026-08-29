@@ -70,6 +70,10 @@ export function ScanPanel() {
   // scanned once the answer arrives, rather than being remembered as a label
   // for files nobody kept.
   const [pending, setPending] = useState<File[] | null>(null);
+  // One recording the worker could not scan says nothing about the next one, so
+  // the fallback command is shown per upload rather than by turning the
+  // deployment's capability off.
+  const [showFallback, setShowFallback] = useState(false);
   const [rawBusy, setRawBusy] = useState(false);
   const [rawError, setRawError] = useState<string | null>(null);
   const [rawOutcome, setRawOutcome] = useState<RawScanOutcome | null>(null);
@@ -166,27 +170,22 @@ export function ScanPanel() {
         setRawOutcome(body);
         return;
       }
-      // The worker is configured but did not deliver, so the fallback command
-      // is what is left: show it rather than promising it.
-      setWorker((current) =>
-        current
-          ? {
-              ...current,
-              available: false,
-              reason: 'This deployment has a scan worker, but it could not scan that recording.',
-            }
-          : current,
-      );
+      // The worker is configured but did not deliver this recording, so the
+      // fallback command is what is left: show it rather than promising it.
+      setShowFallback(true);
       setRawError(
         body?.reason ??
           `The scan worker could not scan that recording (HTTP ${response.status}). Run the ` +
             'command below locally and upload the JSON instead.',
       );
     } catch (error) {
+      setShowFallback(true);
       setRawError(
         error instanceof Error
-          ? `Upload failed: ${error.message}`
-          : 'Upload failed before the recording reached the worker.',
+          ? `Upload failed: ${error.message}. Run the command below locally and upload the JSON ` +
+            'instead.'
+          : 'Upload failed before the recording reached the worker. Run the command below locally ' +
+            'and upload the JSON instead.',
       );
     } finally {
       setRawBusy(false);
@@ -199,6 +198,7 @@ export function ScanPanel() {
     setRecording(recordingLabelForFiles(files.map(toDescriptor)));
     setRawOutcome(null);
     setRawError(null);
+    setShowFallback(false);
     if (worker === null) {
       setPending(files);
       return;
@@ -277,7 +277,7 @@ export function ScanPanel() {
         </p>
       ) : null}
 
-      {recording && worker !== null && !worker.available ? (
+      {recording && ((worker !== null && !worker.available) || showFallback) ? (
         <div className="scan-fallback">
           <p className="muted">
             Nothing was scanned. Run this from the repository root — give the recording&apos;s full

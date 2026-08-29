@@ -46,8 +46,12 @@ Any worker may be used; only this shape is required.
 - one `file` part per file of the recording. Each part's `filename` carries the
   path relative to the recording root, so a directory upload keeps the layout
   `bridge.ingest.load_export_dir` expects. A single `.zip` part is the archive.
-- `recording`: the name the user picked, for logs.
-- `Authorization: Bearer $SCAN_WORKER_TOKEN` when a token is configured.
+- `recording`: the name the user picked; the worker also uses it to name an
+  upload whose parts carry no directory component, so a re-upload of one
+  recording is the same scan rather than a new one.
+- `Authorization: Bearer $SCAN_WORKER_TOKEN` when a token is configured. The
+  bundled worker enforces it when run with `--token` (or `SCAN_WORKER_TOKEN` in
+  its environment); run it that way anywhere it is not on loopback.
 
 **Response** — `200` with the `bridge scan --format map` payload as JSON, bare
 or wrapped as `{ "scan": … }`.

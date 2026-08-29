@@ -17,7 +17,8 @@ holds no recording once it has answered.
 
 Nothing here is trusted with a route on the public internet: it is a local
 helper, so it binds loopback by default and refuses an upload larger than
-``--max-bytes``.
+``--max-bytes``. Anywhere else it must be run with ``--token`` (or
+``SCAN_WORKER_TOKEN``), the same token the app sends as a bearer.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import argparse
 import email.parser
 import email.policy
 import json
+import os
 import tempfile
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -149,6 +151,13 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
     server_version = "bridge-scan-worker"
     max_bytes: int = DEFAULT_MAX_BYTES
     threshold: float = 3.0
+    #: Bearer token a caller must present, when the worker is run with one.
+    token: str | None = None
+
+    def _authorised(self) -> bool:
+        if not self.token:
+            return True
+        return self.headers.get("authorization", "") == f"Bearer {self.token}"
 
     def _json(self, status: int, body: dict) -> None:
         encoded = json.dumps(body).encode()
@@ -167,6 +176,9 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's naming
         if self.path.rstrip("/") not in ("/scan", ""):
             self._json(404, {"error": "not-found"})
+            return
+        if not self._authorised():
+            self._json(401, {"error": "unauthorised"})
             return
 
         length = int(self.headers.get("content-length") or 0)
@@ -193,11 +205,13 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
         self._json(200, payload)
 
 
-def serve(host: str, port: int, max_bytes: int, threshold: float) -> None:
+def serve(
+    host: str, port: int, max_bytes: int, threshold: float, token: str | None = None
+) -> None:
     handler = type(
         "BoundScanRequestHandler",
         (ScanRequestHandler,),
-        {"max_bytes": max_bytes, "threshold": threshold},
+        {"max_bytes": max_bytes, "threshold": threshold, "token": token},
     )
     with ThreadingHTTPServer((host, port), handler) as httpd:
         print(f"scan worker listening on http://{host}:{port}/scan")
@@ -210,8 +224,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
     parser.add_argument("--threshold", type=float, default=3.0, help="detector robust-z threshold")
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("SCAN_WORKER_TOKEN") or None,
+        help="require this bearer token (matches the app's SCAN_WORKER_TOKEN)",
+    )
     args = parser.parse_args(argv)
-    serve(args.host, args.port, args.max_bytes, args.threshold)
+    serve(args.host, args.port, args.max_bytes, args.threshold, args.token)
     return 0
 
 
