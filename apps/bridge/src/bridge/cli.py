@@ -85,8 +85,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
         )
 
     if args.out:
-        path = write_output(result, Path(args.out), args.format)
+        path = write_output(result, Path(args.out), args.format, client_scan_id=args.client_scan_id)
         print(f"wrote {path}")
+        if args.format == "map":
+            print("upload it with the map's “Import bridge scan” panel to create ROUGH_SURFACE reports")
     return 0 if result.quality.usable else 1
 
 
@@ -150,8 +152,18 @@ def main(argv: list[str] | None = None) -> int:
     ps.add_argument(
         "--threshold", type=positive_float, default=3.0, help="robust-z detection threshold"
     )
-    ps.add_argument("--format", choices=["json", "geojson", "csv"], default="json")
+    ps.add_argument(
+        "--format",
+        choices=["json", "geojson", "csv", "map"],
+        default="json",
+        help="'map' writes the payload the Sidewalk Map scan.ingest endpoint accepts",
+    )
     ps.add_argument("--out", default=None, help="write findings to this file")
+    ps.add_argument(
+        "--client-scan-id",
+        default=None,
+        help="idempotency key for --format map (default: content hash of the scan)",
+    )
     ps.add_argument("--seed", type=int, default=1)
     ps.set_defaults(func=cmd_scan)
 

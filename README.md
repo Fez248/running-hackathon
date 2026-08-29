@@ -65,6 +65,41 @@ Recording a real pass — logging apps, the ≥100 Hz (41-100 Hz is scanned as d
 / ≤3 m GPS / gravity-included acceptance checks, and how to read the output — is in
 [apps/bridge/docs/REAL_WORLD_TEST.md](./apps/bridge/docs/REAL_WORLD_TEST.md).
 
+### Putting a scan on the map
+
+`--format map` writes the payload the web app's `scan.ingest` endpoint accepts, so a
+recorded walk becomes `ROUGH_SURFACE` reports:
+
+```bash
+python -m bridge.cli scan ~/Downloads/run.zip --format map --out scan.json
+```
+
+Upload `scan.json` in the **Import bridge scan** panel. The panel shows the capture
+certificate (sample rate, duration, GPS accuracy, verdict and the problems behind it)
+before anything is sent, and sensor-derived reports are drawn with a dotted outline and
+labelled "sensed by phone" so their provenance stays visible next to human reports.
+
+Two rules the seam preserves:
+
+- **An unusable capture creates no reports.** The upload is still recorded, so a rejected
+  recording is auditable instead of vanishing, but the quality gate's refusal to trust the
+  recording is not laundered into map data.
+- **Re-uploading the same file changes nothing.** `clientScanId` defaults to a content hash
+  of the scan and each report is keyed `<clientScanId>:<findingIndex>`, so ingest is
+  idempotent; a re-run whose findings or certificate differ hashes differently and is a
+  different scan, while a re-run that reproduces them byte for byte is the same claim.
+  Concurrent uploads of one scan converge on the same scan and reports, and a scan and its
+  reports are written in one transaction, so a half-imported scan cannot block a retry.
+- **The recording is named, not located.** Only the recording's bare filename travels with
+  the payload; the scan history is as public as the map, so local paths and usernames stay
+  on the machine that ran the detector.
+
+Confidence of a sensor report is the usual GPS-weighted confidence of an unvoted report
+scaled by the detector's own confidence, so a weak detection from a degraded capture never
+outranks a human observation. The detector's factor is stored alongside the report and
+re-applied whenever votes recompute confidence, so agreement raises a sensed report from
+where the detector left it rather than to where a human report would sit.
+
 ## Turso / deployment
 
 The same Prisma schema runs on a local SQLite file and on a remote libSQL database (Turso). When

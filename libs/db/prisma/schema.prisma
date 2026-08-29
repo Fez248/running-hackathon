@@ -46,7 +46,7 @@ model Report {
   accuracyM Float?
   /// Profile of the reporter at capture time.
   capturedByProfile String?
-  /// MANUAL | VOICE — how the observation was captured.
+  /// MANUAL | VOICE | SENSOR — how the observation was captured.
   source    String  @default("MANUAL")
   /// Raw dictated utterance for a VOICE report, kept for auditing the parser.
   transcript String?
@@ -70,6 +70,13 @@ model Report {
   traceId String?
   trace   Trace?  @relation(fields: [traceId], references: [id], onDelete: SetNull)
 
+  /// Detector confidence of a SENSOR report, kept apart from `confidence` so a
+  /// vote recomputing the crowd/GPS part cannot drop the detector's own doubt.
+  detectorConfidence Float?
+  /// Bridge scan a SENSOR report was derived from.
+  surfaceScanId String?
+  surfaceScan   SurfaceScan? @relation(fields: [surfaceScanId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -80,6 +87,37 @@ model Report {
   @@index([gridKey])
   @@index([createdAt])
   @@index([status, createdAt])
+  @@index([surfaceScanId])
+}
+
+/// A floor-imperfection scan produced by `apps/bridge` from a phone IMU + GPS
+/// recording. Kept even when the capture is unusable, so a rejected upload is
+/// auditable instead of silently disappearing.
+model SurfaceScan {
+  id       String @id @default(cuid())
+  /// Idempotency key from the bridge payload; a re-upload resolves to this row.
+  clientScanId String @unique
+  /// Recording the scan was run on (directory or archive name).
+  source   String
+  /// Recording layout the bridge ingester recognised (sensor_logger | csv | ...).
+  format   String
+  /// ok | degraded | unusable — capture-quality gate verdict.
+  verdict  String
+  /// Full capture certificate as JSON (see @sidewalk/core captureQualitySchema).
+  quality  String
+  cadenceSpm Float @default(0)
+  /// Findings reported by the detector, before the quality gate is applied.
+  findingCount Int @default(0)
+  /// Reports actually created from this scan (0 for an unusable capture).
+  reportCount  Int @default(0)
+
+  uploadedById String?
+
+  createdAt DateTime @default(now())
+
+  reports Report[]
+
+  @@index([createdAt])
 }
 
 /// Confirm / dispute signal from another contributor.

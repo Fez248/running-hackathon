@@ -22,7 +22,7 @@ export const PROFILES = ['WHEELCHAIR', 'STROLLER', 'COURIER', 'DELIVERY_ROBOT'] 
 export type Profile = (typeof PROFILES)[number];
 
 /** How an observation reached the map. */
-export const REPORT_SOURCES = ['MANUAL', 'VOICE'] as const;
+export const REPORT_SOURCES = ['MANUAL', 'VOICE', 'SENSOR'] as const;
 export type ReportSource = (typeof REPORT_SOURCES)[number];
 
 export const obstacleKindSchema = z.enum(OBSTACLE_KINDS);

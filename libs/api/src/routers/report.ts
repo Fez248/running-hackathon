@@ -242,10 +242,13 @@ export const reportRouter = createTRPCRouter({
           disagreeCount,
           // Votes cannot buy away the parser's doubt: until a human has read the
           // transcript, a half-understood dictation stays discounted however
-          // many people agree with it.
+          // many people agree with it. A detected report keeps the detector's
+          // own scaling too, so disagreement cannot hand a weak detection the
+          // confidence of a human observation.
           confidence:
             confidence({ agreeCount, disagreeCount, accuracyM: report.accuracyM }) *
-            (report.reviewedAt ? 1 : (report.parseConfidence ?? 1)),
+            (report.reviewedAt ? 1 : (report.parseConfidence ?? 1)) *
+            (report.detectorConfidence ?? 1),
           status: buried ? 'REJECTED' : report.status,
         },
       });

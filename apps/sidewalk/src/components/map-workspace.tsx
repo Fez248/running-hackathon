@@ -17,6 +17,7 @@ import { useVoiceReporter } from '@/hooks/use-voice-reporter';
 import { LocationConsentPanel } from './location-consent-panel';
 import { ReportForm } from './report-form';
 import { RunPanel } from './run-panel';
+import { ScanPanel } from './scan-panel';
 import { StatsPanel } from './stats-panel';
 
 const MapView = dynamic(() => import('./map-view').then((m) => m.MapView), {
@@ -333,10 +334,13 @@ export function MapWorkspace() {
                 confidence {(report.confidence * 100).toFixed(0)}% · +{report.agreeCount}/-
                 {report.disagreeCount}
                 {report.source === 'VOICE' ? ' · dictated' : ''}
+                {report.source === 'SENSOR' ? ' · sensed by phone' : ''}
               </div>
             </div>
           ))}
         </div>
+
+        <ScanPanel />
 
         <StatsPanel />
       </aside>
