@@ -11,8 +11,10 @@ import {
   type Profile,
 } from '@sidewalk/core';
 import { api } from '@/trpc/client';
+import { useLocationPermission } from '@/hooks/use-location-permission';
 import { useRunTracker } from '@/hooks/use-run-tracker';
 import { useVoiceReporter } from '@/hooks/use-voice-reporter';
+import { LocationConsentPanel } from './location-consent-panel';
 import { ReportForm } from './report-form';
 import { RunPanel } from './run-panel';
 import { StatsPanel } from './stats-panel';
@@ -64,6 +66,7 @@ export function MapWorkspace() {
   const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
 
   const utils = api.useUtils();
+  const locationPermission = useLocationPermission();
 
   const runTracker = useRunTracker({
     revealRadiusM: DEFAULT_REVEAL_RADIUS_M,
@@ -73,6 +76,21 @@ export function MapWorkspace() {
     },
   });
   const running = runTracker.status.active;
+
+  /**
+   * Consent first, watch second: `watchPosition` would raise the prompt itself,
+   * but then the explanation of *why* arrives after the browser has already
+   * asked, and a denial reads as a broken button. Permission granted in the same
+   * gesture still counts, so the watch starts without a second tap.
+   */
+  const handleStart = useCallback(async () => {
+    if (locationPermission.state === 'granted') {
+      runTracker.start();
+      return;
+    }
+    const state = await locationPermission.request();
+    if (state === 'granted') runTracker.start();
+  }, [locationPermission, runTracker]);
 
   const reports = api.report.byBounds.useQuery(
     {
@@ -212,6 +230,8 @@ export function MapWorkspace() {
           they move. Streets you have not surveyed stay under the fog.
         </p>
 
+        <LocationConsentPanel permission={locationPermission} runActive={running} />
+
         <RunPanel
           status={runTracker.status}
           distanceM={runTracker.status.distanceM}
@@ -220,7 +240,8 @@ export function MapWorkspace() {
           onToggleFog={setFogEnabled}
           follow={follow}
           onToggleFollow={setFollow}
-          onStart={runTracker.start}
+          onStart={() => void handleStart()}
+          locationState={locationPermission.state}
           onStop={() => void runTracker.stop()}
           voice={{
             enabled: voiceEnabled,
