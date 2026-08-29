@@ -9,7 +9,7 @@ from imukit.geo import cumulative_distance, position_at_distance
 from bridge.experiments import ROUTE_ANOMALIES
 from bridge.ingest import load_recording, write_export_dir
 from bridge.quality import assess
-from bridge.scan import scan_recording, to_csv, to_geojson
+from bridge.scan import format_report, scan_recording, to_csv, to_geojson
 from bridge.synth import SurfaceScenario, simulate_pass
 
 SENSORLOGGER_ACCEL = """time,seconds_elapsed,z,y,x
@@ -193,3 +193,36 @@ def test_position_at_distance_inverts_cumulative_distance():
     lat, lon = position_at_distance(gps, np.array([d[10], d[40]]))
     assert lat[0] == pytest.approx(gps.lat[10], abs=1e-4)
     assert lon[1] == pytest.approx(gps.lon[40], abs=1e-4)
+
+
+def test_blank_accuracy_column_keeps_the_gps_track(tmp_path):
+    trace, gps, _ = _short_pass(length_m=120.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+    location = tmp_path / "rec" / "Location.csv"
+    rows = location.read_text().splitlines()
+    header, body = rows[0], rows[1:]
+    blanked = [",".join(c if i != 2 else "" for i, c in enumerate(r.split(","))) for r in body]
+    location.write_text("\n".join([header, *blanked]) + "\n")
+
+    rec = load_recording(tmp_path / "rec")
+    assert rec.gps is not None
+    assert rec.gps.t.size == gps.t.size
+    assert rec.gps.accuracy_m is None
+    assert assess(rec).usable
+
+
+def test_non_increasing_gps_timestamps_are_rejected(tmp_path):
+    trace, gps, _ = _short_pass(length_m=120.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+    location = tmp_path / "rec" / "Location.csv"
+    rows = location.read_text().splitlines()
+    header, body = rows[0], rows[1:]
+    frozen = [",".join([body[0].split(",")[0], body[0].split(",")[1], *r.split(",")[2:]]) for r in body]
+    location.write_text("\n".join([header, *frozen]) + "\n")
+
+    rec = load_recording(tmp_path / "rec")
+    result, pp = scan_recording(rec)
+    assert pp is None
+    assert not result.quality.usable
+    assert any("GPS timestamps" in p for p in result.quality.problems)
+    assert "GPS rate unknown" in format_report(result)
