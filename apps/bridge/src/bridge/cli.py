@@ -1,4 +1,4 @@
-"""CLI: ``python -m bridge.cli run|demo|plot|scan``."""
+"""CLI: ``python -m bridge.cli run|demo|plot|scan|sync``."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from .experiments import ALL_EXPERIMENTS, ROUTE_ANOMALIES, run_all
 from .ingest import load_recording, write_export_dir
 from .pipeline import process_pass
 from .scan import format_report, scan_recording, write_output
+from .sensorlogger import SyncConfig, SyncError, sync_forever, sync_once
 from .synth import SurfaceScenario, simulate_pass
 
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -92,6 +93,35 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return 0 if result.quality.usable else 1
 
 
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Process recordings uploaded to a Sensor Logger Study (see docs/SENSOR_LOGGER_SYNC.md)."""
+    try:
+        config = SyncConfig.from_env()
+        if args.limit:
+            config.claim_limit = args.limit
+        if args.poll is None:
+            cycles = [sync_once(config, threshold=args.threshold)]
+        else:
+            cycles = list(
+                sync_forever(
+                    config,
+                    args.poll,
+                    max_cycles=args.max_cycles,
+                    threshold=args.threshold,
+                )
+            )
+    except SyncError as exc:
+        print(f"error: {exc}")
+        return 2
+
+    failures = 0
+    for outcomes in cycles:
+        for outcome in outcomes:
+            print(json.dumps(outcome))
+            failures += outcome["status"] == "failed"
+    return 1 if failures else 0
+
+
 def cmd_plot(args: argparse.Namespace) -> int:
     import matplotlib
 
@@ -166,6 +196,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     ps.add_argument("--seed", type=int, default=1)
     ps.set_defaults(func=cmd_scan)
+
+    py = sub.add_parser("sync", help="process recordings uploaded to a Sensor Logger Study")
+    py.add_argument("--limit", type=int, default=None, help="uploads to lease per cycle (max 25)")
+    py.add_argument(
+        "--poll", type=positive_float, default=None, help="keep polling every N seconds"
+    )
+    py.add_argument(
+        "--max-cycles", type=int, default=None, help="stop after N polling cycles (with --poll)"
+    )
+    py.add_argument(
+        "--threshold", type=positive_float, default=3.0, help="robust-z detection threshold"
+    )
+    py.set_defaults(func=cmd_sync)
 
     pp_ = sub.add_parser("plot", help="render diagnostic figure")
     pp_.add_argument("--seed", type=int, default=1)

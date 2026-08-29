@@ -100,6 +100,11 @@ outranks a human observation. The detector's factor is stored alongside the repo
 re-applied whenever votes recompute confidence, so agreement raises a sensed report from
 where the detector left it rather than to where a human report would sit.
 
+Recordings uploaded to a [Sensor Logger](https://sensorlogger.app/) Study can skip the manual step
+entirely: a Study webhook queues each upload, and `python -m bridge.cli sync` downloads, scans and
+maps it. Endpoint contract, Study setup, secret handling and operations are in
+[docs/SENSOR_LOGGER_SYNC.md](./docs/SENSOR_LOGGER_SYNC.md).
+
 ## Turso / deployment
 
 The same Prisma schema runs on a local SQLite file and on a remote libSQL database (Turso). When
