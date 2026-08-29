@@ -324,3 +324,18 @@ button:disabled {
 .fog-canvas {
   pointer-events: none;
 }
+
+/* Strategy-game palette: the basemap reads as terrain under the tile grid. */
+.map-wrap .leaflet-tile-pane {
+  filter: saturate(0.5) contrast(1.08) brightness(0.82) hue-rotate(-8deg);
+}
+
+/* Scanline vignette over the map frame, kept out of pointer handling. */
+.map-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 500;
+  pointer-events: none;
+  box-shadow: inset 0 0 90px rgba(4, 10, 18, 0.75);
+}
