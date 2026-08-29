@@ -110,9 +110,8 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
     }
 
     // A second start without a stop would leave the previous recogniser
-    // restarting itself from its own onend handler.
+    // running alongside the new one.
     if (recognitionRef.current) {
-      wantListeningRef.current = false;
       recognitionRef.current.abort();
       recognitionRef.current = null;
     }
@@ -151,6 +150,9 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
 
     // Chrome ends the session after a pause even with continuous = true.
     recognition.onend = () => {
+      // `abort()` ends asynchronously, so a replaced recogniser must not restart
+      // itself off the flag that now belongs to its replacement.
+      if (recognitionRef.current !== recognition) return;
       setInterim('');
       if (wantListeningRef.current) {
         try {

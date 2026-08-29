@@ -43,10 +43,32 @@ describe('clampBounds', () => {
     expect(boundsSchema.safeParse(clamped).success).toBe(true);
   });
 
-  it('orders edges panned across the antimeridian', () => {
-    const clamped = clampBounds({ minLat: 10, maxLat: 12, minLng: 190, maxLng: 178 });
-    expect(clamped).toEqual({ minLat: 10, maxLat: 12, minLng: 178, maxLng: 180 });
-    expect(boundsSchema.safeParse(clamped).success).toBe(true);
+  it('wraps a viewport panned into the next world copy onto its real longitudes', () => {
+    expect(clampBounds({ minLat: 10, maxLat: 12, minLng: 190, maxLng: 210 })).toEqual({
+      minLat: 10,
+      maxLat: 12,
+      minLng: -170,
+      maxLng: -150,
+    });
+    expect(clampBounds({ minLat: 10, maxLat: 12, minLng: -210, maxLng: -190 })).toEqual({
+      minLat: 10,
+      maxLat: 12,
+      minLng: 150,
+      maxLng: 170,
+    });
+  });
+
+  it('widens a viewport straddling the antimeridian instead of truncating it', () => {
+    // One min/max interval cannot express 170..-170, and dropping either half
+    // would hide reports that are on screen.
+    for (const straddling of [
+      { minLat: 10, maxLat: 12, minLng: 170, maxLng: 190 },
+      { minLat: 10, maxLat: 12, minLng: -190, maxLng: -170 },
+    ]) {
+      const clamped = clampBounds(straddling);
+      expect(clamped).toEqual({ minLat: 10, maxLat: 12, minLng: -180, maxLng: 180 });
+      expect(boundsSchema.safeParse(clamped).success).toBe(true);
+    }
   });
 });
 

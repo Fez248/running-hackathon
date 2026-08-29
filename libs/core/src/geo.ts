@@ -29,10 +29,17 @@ export function boundsAround(center: Coordinate, radiusM: number) {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+/** Fold an out-of-range longitude into [-180, 180). */
+const wrapLongitude = (lng: number): number =>
+  lng >= -180 && lng <= 180 ? lng : ((((lng + 180) % 360) + 360) % 360) - 180;
+
 /**
- * Clamp a viewport into valid WGS84 ranges. Map libraries report unwrapped
- * bounds — zoomed out, or panned across the antimeridian, the edges run past
- * ±180 — which the bounds schemas reject.
+ * Normalise a map viewport into valid WGS84 ranges. Map libraries report
+ * unwrapped bounds — a world copy to the east reads 190..210, a view straddling
+ * the antimeridian reads 170..190 — which the bounds schemas reject. World
+ * offsets are wrapped back onto the real longitudes; a straddling view, which a
+ * single min/max interval cannot express, widens to the whole world so that no
+ * visible report is dropped from the result.
  */
 export function clampBounds(bounds: {
   minLat: number;
@@ -40,16 +47,15 @@ export function clampBounds(bounds: {
   minLng: number;
   maxLng: number;
 }) {
-  const west = clamp(bounds.minLng, -180, 180);
-  const east = clamp(bounds.maxLng, -180, 180);
-  const south = clamp(bounds.minLat, -90, 90);
-  const north = clamp(bounds.maxLat, -90, 90);
-  return {
-    minLat: Math.min(south, north),
-    maxLat: Math.max(south, north),
-    minLng: Math.min(west, east),
-    maxLng: Math.max(west, east),
-  };
+  const south = clamp(Math.min(bounds.minLat, bounds.maxLat), -90, 90);
+  const north = clamp(Math.max(bounds.minLat, bounds.maxLat), -90, 90);
+  const wholeWorld = { minLat: south, maxLat: north, minLng: -180, maxLng: 180 };
+  if (bounds.maxLng - bounds.minLng >= 360) return wholeWorld;
+
+  const west = wrapLongitude(bounds.minLng);
+  const east = wrapLongitude(bounds.maxLng);
+  if (west > east) return wholeWorld;
+  return { minLat: south, maxLat: north, minLng: west, maxLng: east };
 }
 
 /**
