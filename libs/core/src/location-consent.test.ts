@@ -35,16 +35,26 @@ describe('canRequestLocation', () => {
     expect(canRequestLocation(reset, 2_000)).toBe(true);
   });
 
-  it('backs off retryable failures instead of blocking them', () => {
+  it('treats a fixless probe as consent, counting the attempt', () => {
+    // The browser would have answered PERMISSION_DENIED if access were blocked,
+    // so a timeout means "allowed, no fix yet" — the run may start and wait.
     let record = reduceLocationConsent(initialLocationConsent(), { type: 'requested', at: 0 });
     record = reduceLocationConsent(record, { type: 'failed', failure: 'timeout' });
-    expect(canRequestLocation(record, CONSENT_RETRY_COOLDOWN_MS - 1)).toBe(false);
-    expect(canRequestLocation(record, CONSENT_RETRY_COOLDOWN_MS)).toBe(true);
+    expect(record).toMatchObject({ state: 'granted', failedAttempts: 1, lastFailure: 'timeout' });
+    expect(canRequestLocation(record, 1)).toBe(true);
 
     record = reduceLocationConsent(record, { type: 'requested', at: CONSENT_RETRY_COOLDOWN_MS });
     record = reduceLocationConsent(record, { type: 'failed', failure: 'position-unavailable' });
     expect(record.failedAttempts).toBe(2);
     expect(retryCooldownMs(record.failedAttempts)).toBe(CONSENT_RETRY_COOLDOWN_MS * 2);
+  });
+
+  it('does not invent consent where there is no Geolocation API', () => {
+    const record = reduceLocationConsent(
+      reduceLocationConsent(initialLocationConsent(), { type: 'failed', failure: 'unavailable' }),
+      { type: 'failed', failure: 'timeout' },
+    );
+    expect(record.state).toBe('unavailable');
   });
 
   it('caps the backoff', () => {

@@ -23,6 +23,8 @@ interface RunPanelProps {
   onStop: () => void;
   /** Blocks the start button when the browser will refuse to track at all. */
   locationState: LocationPermissionState;
+  /** A prompt is already open: a second Start would race its own run. */
+  locationRequesting: boolean;
   voice: {
     enabled: boolean;
     supported: boolean;
@@ -62,6 +64,7 @@ export function RunPanel({
   onStart,
   onStop,
   locationState,
+  locationRequesting,
   voice,
   onToggleVoice,
   onCancelPhrase,
@@ -96,8 +99,17 @@ export function RunPanel({
             Stop run
           </button>
         ) : (
-          <button className="primary" type="button" onClick={onStart} disabled={locationBlocked}>
-            {locationState === 'granted' ? 'Start run' : 'Start run (asks for location)'}
+          <button
+            className="primary"
+            type="button"
+            onClick={onStart}
+            disabled={locationBlocked || locationRequesting}
+          >
+            {locationRequesting
+              ? 'Waiting for location access…'
+              : locationState === 'granted'
+                ? 'Start run'
+                : 'Start run (asks for location)'}
           </button>
         )}
         <span className="badge" data-gps={status.quality} role="status">

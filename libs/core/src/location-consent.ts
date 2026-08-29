@@ -128,14 +128,18 @@ export function reduceLocationConsent(
     case 'granted':
       return { ...record, state: 'granted', failedAttempts: 0, lastFailure: null };
     case 'failed': {
-      // A missing fix says nothing about permission, so the state only moves for
-      // outcomes that are actually about access.
+      // The browser answers a blocked request with PERMISSION_DENIED, and only
+      // starts the timeout clock once access has been allowed. So a timeout or a
+      // missing fix is positive evidence of consent: the run may start and wait
+      // for its first fix, which is the only thing the probe cannot supply.
       const state: LocationPermissionState =
         event.failure === 'denied'
           ? 'denied'
           : event.failure === 'unavailable'
             ? 'unavailable'
-            : record.state;
+            : record.state === 'unavailable'
+              ? record.state
+              : 'granted';
       return {
         ...record,
         state,
@@ -180,9 +184,9 @@ export function locationFailureMessage(failure: LocationConsentFailure): string 
     case 'denied':
       return LOCATION_CONSENT_MESSAGES.denied;
     case 'position-unavailable':
-      return 'Your device could not produce a position — indoors or with GPS off this is common. Try again outside.';
+      return 'Location access is allowed, but your device could not produce a position yet — indoors or with GPS off this is common. A run can start and will pick up the track once a fix arrives.';
     case 'timeout':
-      return 'The position request timed out before a fix arrived. Try again with a clear view of the sky.';
+      return 'Location access is allowed, but no fix arrived yet. A run can start and will pick up the track once your device locates you.';
     case 'unavailable':
       return LOCATION_CONSENT_MESSAGES.unavailable;
   }
