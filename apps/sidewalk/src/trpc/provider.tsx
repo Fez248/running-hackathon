@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
-import { transformer } from '@sidewalk/api';
+import { transformer } from '@sidewalk/core';
 import { api } from './client';
 
 function baseUrl(): string {

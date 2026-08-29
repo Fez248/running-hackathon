@@ -1,7 +1,7 @@
 import { initTRPC } from '@trpc/server';
 import { ZodError } from 'zod';
+import { transformer } from '@sidewalk/core';
 import { prisma } from '@sidewalk/db';
-import { transformer } from './transformer';
 
 export interface CreateContextOptions {
   headers?: Headers;

@@ -6,7 +6,6 @@ import {
   createReportSchema,
   gridKey,
   passabilityForProfile,
-  profileSchema,
   type Passability,
   voteSchema,
 } from '@sidewalk/core';
@@ -80,34 +79,39 @@ export const reportRouter = createTRPCRouter({
   createMany: publicProcedure
     .input(z.object({ reports: z.array(createReportSchema).min(1).max(200) }))
     .mutation(async ({ ctx, input }) => {
-      const created: string[] = [];
+      const ids: string[] = [];
       for (const report of input.reports) {
-        const row = await ctx.prisma.report.upsert({
-          where: { clientReportId: report.clientReportId ?? `anon-${crypto.randomUUID()}` },
-          update: {},
-          create: {
-            lat: report.lat,
-            lng: report.lng,
-            gridKey: gridKey({ lat: report.lat, lng: report.lng }),
-            kind: report.kind,
-            passability: report.passability,
-            heightCm: report.heightCm ?? null,
-            widthCm: report.widthCm ?? null,
-            note: report.note ?? null,
-            accuracyM: report.accuracyM ?? null,
-            capturedByProfile: report.capturedByProfile ?? null,
-            clientReportId: report.clientReportId ?? null,
-            authorId: ctx.user?.id ?? null,
-            confidence: confidence({
-              agreeCount: 0,
-              disagreeCount: 0,
-              accuracyM: report.accuracyM,
-            }),
-          },
-        });
-        created.push(row.id);
+        const data = {
+          lat: report.lat,
+          lng: report.lng,
+          gridKey: gridKey({ lat: report.lat, lng: report.lng }),
+          kind: report.kind,
+          passability: report.passability,
+          heightCm: report.heightCm ?? null,
+          widthCm: report.widthCm ?? null,
+          note: report.note ?? null,
+          photoUrl: report.photoUrl ?? null,
+          accuracyM: report.accuracyM ?? null,
+          capturedByProfile: report.capturedByProfile ?? null,
+          clientReportId: report.clientReportId ?? null,
+          authorId: ctx.user?.id ?? null,
+          confidence: confidence({
+            agreeCount: 0,
+            disagreeCount: 0,
+            accuracyM: report.accuracyM,
+          }),
+        };
+
+        const row = report.clientReportId
+          ? await ctx.prisma.report.upsert({
+              where: { clientReportId: report.clientReportId },
+              update: {},
+              create: data,
+            })
+          : await ctx.prisma.report.create({ data });
+        ids.push(row.id);
       }
-      return { ids: created, count: created.length };
+      return { ids, count: ids.length };
     }),
 
   /** Confirm or dispute someone else's report. */
@@ -141,8 +145,9 @@ export const reportRouter = createTRPCRouter({
     });
   }),
 
+  /** Mark a feature fixed: roadworks removed, ramp built, van driven away. */
   resolve: publicProcedure
-    .input(z.object({ id: z.string(), profile: profileSchema.optional() }))
+    .input(z.object({ id: z.string() }))
     .mutation(({ ctx, input }) =>
       ctx.prisma.report.update({ where: { id: input.id }, data: { status: 'RESOLVED' } }),
     ),
