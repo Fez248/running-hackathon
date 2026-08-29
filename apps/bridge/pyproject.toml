@@ -23,7 +23,7 @@ imukit = { path = "../../libs/imukit", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "../../libs/imukit/src"]
+pythonpath = ["src", "scripts", "../../libs/imukit/src"]
 
 [tool.ruff]
 line-length = 110

@@ -1,0 +1,92 @@
+name: process-recordings
+
+# Scan the recordings a push adds to `recordings/` and upload the findings to the
+# Sidewalk Map. `scripts/process_recordings.py` holds the logic (and its tests);
+# this workflow decides *which* recordings to process.
+on:
+  push:
+    paths:
+      - 'recordings/**'
+  workflow_dispatch:
+    inputs:
+      recording:
+        description: 'Recording to process (name in recordings/, or blank for all of them)'
+        required: false
+        type: string
+
+concurrency:
+  group: process-recordings-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    env:
+      SIDEWALK_API_URL: ${{ vars.SIDEWALK_API_URL || 'https://sidewalk-map-gamma.vercel.app' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A push's diff needs the commit before it; workflow_dispatch does not
+          # look at history at all.
+          fetch-depth: ${{ github.event_name == 'push' && 2 || 1 }}
+
+      - name: Select recordings
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_RECORDING: ${{ inputs.recording }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then
+            # Files this push added or modified under recordings/. `git show`
+            # covers the common single-commit push and needs no `before` sha,
+            # which is unusable on a branch's first push anyway.
+            git show --pretty=format: --name-only --diff-filter=AM "$GITHUB_SHA" \
+              | { grep -E '^recordings/' || true; } > selected.txt
+          elif [ -n "$INPUT_RECORDING" ]; then
+            path="recordings/$(basename "$INPUT_RECORDING")"
+            test -e "$path" || { echo "::error::no such recording: $path"; exit 1; }
+            echo "$path" > selected.txt
+          else
+            find recordings -mindepth 1 -maxdepth 1 ! -name README.md > selected.txt
+          fi
+          # READMEs and other prose are not captures.
+          { grep -vE '\.md$' selected.txt || true; } | sort -u > recordings.txt
+          echo "count=$(wc -l < recordings.txt)" >> "$GITHUB_OUTPUT"
+          echo 'Selected:'; cat recordings.txt
+
+      - name: Guard recording sizes
+        run: |
+          set -euo pipefail
+          while read -r f; do
+            [ -e "$f" ] || { echo "::error::$f is missing from the checkout"; exit 1; }
+            size=$(du -sm "$f" | cut -f1)
+            if [ "$size" -gt 50 ]; then
+              echo "::error file=$f::$f is ${size} MB; recordings must stay under 50 MB (see recordings/README.md)"
+              exit 1
+            fi
+          done < recordings.txt
+
+      - uses: actions/setup-python@v5
+        if: steps.select.outputs.count != '0'
+        with:
+          python-version: '3.11'
+
+      - name: Install bridge
+        if: steps.select.outputs.count != '0'
+        run: pip install -e libs/imukit -e 'apps/bridge[dev]'
+
+      - name: Scan and ingest
+        run: |
+          set -euo pipefail
+          # Runs with no arguments when nothing was selected, so the job still
+          # summarises that there was nothing to do.
+          mapfile -t recs < recordings.txt
+          python3 apps/bridge/scripts/process_recordings.py --out-dir payloads "${recs[@]}"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.select.outputs.count != '0'
+        with:
+          name: recording-payloads
+          path: payloads/*.payload.json
+          if-no-files-found: warn
