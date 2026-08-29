@@ -28,6 +28,47 @@ const CLEAR_ANIMATION_MS = 900;
 
 const SQRT3 = Math.sqrt(3);
 
+/**
+ * Drifting mist, baked once into a tiling canvas: soft blots of pale grey over
+ * transparency, so fogged hexes read as cloud rather than as a flat scrim.
+ */
+function createMistPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  const tile = document.createElement('canvas');
+  tile.width = 128;
+  tile.height = 128;
+  const tileCtx = tile.getContext('2d');
+  if (!tileCtx) return null;
+
+  // A fixed pseudo-random sequence: the mist must be identical on every redraw.
+  let seed = 1337;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+
+  for (let blot = 0; blot < 90; blot += 1) {
+    const x = random() * 128;
+    const y = random() * 128;
+    const radius = 8 + random() * 26;
+    const alpha = 0.03 + random() * 0.09;
+    const gradient = tileCtx.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, `rgba(203, 213, 225, ${alpha})`);
+    gradient.addColorStop(1, 'rgba(203, 213, 225, 0)');
+    tileCtx.fillStyle = gradient;
+    tileCtx.beginPath();
+    tileCtx.arc(x, y, radius, 0, Math.PI * 2);
+    tileCtx.fill();
+  }
+
+  return ctx.createPattern(tile, 'repeat');
+}
+
+/** Stable per-tile jitter, so neighbouring fogged hexes are not identical. */
+function tileNoise(q: number, r: number): number {
+  const hash = Math.sin(q * 127.1 + r * 311.7) * 43758.5453;
+  return hash - Math.floor(hash);
+}
+
 interface Axial {
   q: number;
   r: number;
@@ -86,6 +127,16 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
   const drawRef = useRef<() => void>(() => {});
   /** Tile id -> timestamp it was first seen cleared, for the flash. */
   const clearedAtRef = useRef<Map<string, number>>(new Map());
+  /**
+   * Every fog cell this session has ever seen revealed. Server queries are
+   * viewport-scoped and a run's pending reveals are dropped when it stops, so
+   * derived state would re-fog ground the runner already took. Reveals are
+   * monotonic: this set only grows.
+   */
+  const revealedRef = useRef<Set<string>>(new Set());
+  /** Tiles cleared by passing the runner over them, kept for the same reason. */
+  const clearedTilesRef = useRef<Set<string>>(new Set());
+  const mistRef = useRef<CanvasPattern | null>(null);
   const seededRef = useRef(false);
   const frameRef = useRef<number | null>(null);
 
@@ -130,7 +181,7 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
       ctx.clearRect(0, 0, size.x, size.y);
       if (!visible) return;
 
-      const revealed = new Set<string>();
+      const revealed = revealedRef.current;
       for (const cell of cells) revealed.add(cell.cellKey);
       for (const bounds of pendingBounds) {
         revealed.add(
@@ -140,6 +191,7 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
           }),
         );
       }
+      if (!mistRef.current) mistRef.current = createMistPattern(ctx);
 
       // Tile grid: anchored at the nearest integer zoom, scaled by the rest.
       const zoom = map.getZoom();
@@ -211,14 +263,19 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
           ) {
             continue;
           }
+          const id = `${baseZoom}:${q}:${r}`;
           const latLng = map.unproject(L.point(world.x, world.y), baseZoom).wrap();
-          let cleared = revealed.has(fogCellKey({ lat: latLng.lat, lng: latLng.lng }));
+          let cleared =
+            clearedTilesRef.current.has(id) ||
+            revealed.has(fogCellKey({ lat: latLng.lat, lng: latLng.lng }));
           if (!cleared && liveCenter) {
             const dx = screen.x - liveCenter.x;
             const dy = screen.y - liveCenter.y;
             cleared = dx * dx + dy * dy <= liveRadiusPx * liveRadiusPx;
           }
-          tiles.push({ id: `${baseZoom}:${q}:${r}`, q, r, cx: screen.x, cy: screen.y, cleared });
+          // Taken ground stays taken, whatever the next server query returns.
+          if (cleared) clearedTilesRef.current.add(id);
+          tiles.push({ id, q, r, cx: screen.x, cy: screen.y, cleared });
         }
       }
 
@@ -238,13 +295,28 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
         }
       }
 
-      // Fog body: a dark field with a hint of horizontal scan banding.
-      ctx.fillStyle = `rgba(6, 12, 20, ${opacity})`;
+      // Fog body: unlit ink, then mist, then per-tile shading, so undiscovered
+      // ground looks like weather over a tabletop map.
+      ctx.fillStyle = `rgba(12, 14, 13, ${opacity})`;
       ctx.fillRect(0, 0, size.x, size.y);
+      if (mistRef.current) {
+        ctx.save();
+        ctx.globalAlpha = 0.5 * opacity;
+        ctx.fillStyle = mistRef.current;
+        ctx.fillRect(0, 0, size.x, size.y);
+        ctx.restore();
+      }
       ctx.save();
-      ctx.globalAlpha = 0.35 * opacity;
-      ctx.fillStyle = 'rgba(30, 58, 74, 1)';
-      for (let y = 0; y < size.y; y += 4) ctx.fillRect(0, y, size.x, 1);
+      for (const tile of tiles) {
+        if (tile.cleared) continue;
+        const noise = tileNoise(tile.q, tile.r);
+        // Mostly deepening shadow, with the occasional paler bank of cloud.
+        const pale = noise > 0.82;
+        ctx.globalAlpha = (pale ? 0.07 + noise * 0.06 : 0.1 + noise * 0.2) * opacity;
+        ctx.fillStyle = pale ? 'rgba(226, 232, 240, 1)' : 'rgba(6, 7, 9, 1)';
+        hexPath(ctx, tile.cx, tile.cy, hexScreen * (0.86 + noise * 0.14));
+        ctx.fill();
+      }
       ctx.restore();
 
       // Punch the explored tiles out of the fog.
@@ -279,10 +351,10 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
       }
       ctx.restore();
 
-      // Grid on top: bright over explored ground, dim over fog.
-      ctx.lineWidth = Math.max(1, hexScreen / 26);
+      // Grid on top: inked hex borders, brighter over discovered ground.
+      ctx.lineWidth = Math.max(1, hexScreen / 22);
       for (const tile of tiles) {
-        ctx.strokeStyle = tile.cleared ? 'rgba(94, 234, 212, 0.34)' : 'rgba(125, 211, 252, 0.13)';
+        ctx.strokeStyle = tile.cleared ? 'rgba(214, 179, 102, 0.34)' : 'rgba(120, 113, 84, 0.35)';
         hexPath(ctx, tile.cx, tile.cy, hexScreen);
         ctx.stroke();
       }
@@ -292,8 +364,8 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
       const clearedIds = new Set(tiles.filter((tile) => tile.cleared).map((tile) => tile.id));
       ctx.save();
       ctx.lineWidth = Math.max(1.5, hexScreen / 12);
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
-      ctx.shadowColor = 'rgba(56, 189, 248, 0.9)';
+      ctx.strokeStyle = 'rgba(245, 197, 92, 0.55)';
+      ctx.shadowColor = 'rgba(255, 176, 59, 0.9)';
       ctx.shadowBlur = hexScreen / 2;
       for (const tile of tiles) {
         if (!tile.cleared) continue;
@@ -325,13 +397,13 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
         if (age >= 1) continue;
         animating = true;
         const fade = 1 - age;
-        ctx.globalAlpha = 0.55 * fade;
-        ctx.fillStyle = 'rgba(125, 252, 235, 1)';
+        ctx.globalAlpha = 0.5 * fade;
+        ctx.fillStyle = 'rgba(255, 214, 138, 1)';
         hexPath(ctx, tile.cx, tile.cy, hexScreen * (0.4 + 0.6 * age));
         ctx.fill();
         ctx.globalAlpha = Math.min(1, fade * 1.4);
         ctx.lineWidth = Math.max(1.5, hexScreen / 9);
-        ctx.strokeStyle = 'rgba(190, 255, 245, 1)';
+        ctx.strokeStyle = 'rgba(255, 236, 190, 1)';
         hexPath(ctx, tile.cx, tile.cy, hexScreen * (0.7 + 0.5 * age));
         ctx.stroke();
       }
