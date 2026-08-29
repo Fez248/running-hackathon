@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  clientReportIdSchema,
   coordinateSchema,
   latitudeSchema,
   longitudeSchema,
@@ -225,7 +226,7 @@ export const voiceReportSchema = z.object({
   recognitionConfidence: z.number().min(0).max(1).optional(),
   capturedByProfile: profileSchema.optional(),
   traceId: z.string().optional(),
-  clientReportId: z.string().min(1).max(64).optional(),
+  clientReportId: clientReportIdSchema.optional(),
 });
 export type VoiceReportInput = z.infer<typeof voiceReportSchema>;
 

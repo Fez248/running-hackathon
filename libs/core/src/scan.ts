@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { latitudeSchema, longitudeSchema, type Passability } from './obstacles';
+import {
+  latitudeSchema,
+  longitudeSchema,
+  SENSOR_REPORT_ID_PREFIX,
+  type Passability,
+} from './obstacles';
 import { confidence } from './scoring';
 
 /**
@@ -94,7 +99,7 @@ export type ScanIngestInput = z.infer<typeof scanIngestSchema>;
  * repeated upload of the same scan file idempotent.
  */
 export function sensorReportClientId(clientScanId: string, findingIndex: number): string {
-  return `${clientScanId}:${findingIndex}`;
+  return `${SENSOR_REPORT_ID_PREFIX}${clientScanId}:${findingIndex}`;
 }
 
 /**
