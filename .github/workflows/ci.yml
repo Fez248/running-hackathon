@@ -37,3 +37,28 @@ jobs:
         working-directory: apps/bridge
       - run: python -m bridge.cli scan --demo --out /tmp/findings.json
         working-directory: apps/bridge
+
+  # Production deploy of the newest main commit; a push that lands while an
+  # earlier deploy is queued supersedes it.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, bridge]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: vercel-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://sidewalk-map-gamma.vercel.app
+    env:
+      VERCEL_ORG_ID: team_GlF6QXx6tsCBdWVOWgd1Kz1Z
+      VERCEL_PROJECT_ID: prj_lO6bPSTCNevWjXm9BFMDWNGEXeG6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm i -g vercel@59.3.0
+      - run: vercel deploy --prod --yes --token "$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
