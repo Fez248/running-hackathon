@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--threshold", type=float, default=3.0, help="detector robust-z threshold")
     parser.add_argument(
         "--token",
-        default=os.environ.get("SCAN_WORKER_TOKEN") or None,
+        default=(os.environ.get("SCAN_WORKER_TOKEN") or "").strip() or None,
         help="require this bearer token (matches the app's SCAN_WORKER_TOKEN)",
     )
     args = parser.parse_args(argv)
