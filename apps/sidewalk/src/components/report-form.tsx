@@ -137,10 +137,12 @@ export function ReportForm({ selection, profile, onSelect, onDone }: ReportFormP
       <input
         id="height"
         type="number"
-        inputMode="numeric"
+        inputMode="decimal"
         min={0}
         max={200}
-        step={1}
+        // Decimals are accepted and rounded on submit; step=1 would make the
+        // form itself refuse "7.5" before that.
+        step="any"
         value={heightCm}
         onChange={(event) => setHeightCm(event.target.value)}
       />
