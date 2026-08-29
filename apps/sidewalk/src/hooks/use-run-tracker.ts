@@ -229,6 +229,9 @@ export function useRunTracker({
     setStatus((s) => ({
       ...s,
       active: true,
+      // A fresh watch has not reported yet, and the previous run's denial must not
+      // be read as this one's outcome.
+      permission: 'unknown',
       error: null,
       lastRejection: null,
       fixes: 0,

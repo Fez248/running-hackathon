@@ -178,10 +178,14 @@ export function MapWorkspace() {
 
   // A revocation made in browser settings is invisible to a browser without a
   // queryable geolocation permission, so the watch's own denial is what tells the
-  // consent card its remembered grant is stale.
+  // consent card its remembered grant is stale. Edge-triggered: the tracker keeps
+  // reporting the denial after it stops, and replaying it would undo a recovery.
+  const noteDeniedRef = useRef(locationPermission.noteDenied);
+  noteDeniedRef.current = locationPermission.noteDenied;
+  const trackerPermission = runTracker.status.permission;
   useEffect(() => {
-    if (runTracker.status.permission === 'denied') locationPermission.noteDenied();
-  }, [runTracker.status.permission, locationPermission]);
+    if (trackerPermission === 'denied') noteDeniedRef.current();
+  }, [trackerPermission]);
 
   // Dictation is tied to the run: stopping the run also stops the microphone.
   useEffect(() => {
