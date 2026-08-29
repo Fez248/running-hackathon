@@ -156,16 +156,20 @@ export function aggregatePassability(
     }))
     .filter((scored) => scored.weight >= MIN_TRUSTED_WEIGHT);
 
-  // No trusted observation means no call: `UNKNOWN` is not the mildest verdict
-  // here, it is the absence of one, so it cannot seed the severity fold.
-  const verdict: Passability = trusted.length
-    ? trusted.reduce<Passability>(
+  // `UNKNOWN` is not a mild verdict, it is the absence of one, so it neither
+  // seeds nor competes in the severity fold: a report someone filed without
+  // judging passability must not bury a confirmed `PASSABLE` next to it. Such a
+  // report still decides the verdict once its measurements make it `DIFFICULT`
+  // or `IMPASSABLE` for the profile, which is what `effective` accounts for.
+  const decisive = trusted.filter((scored) => scored.effective !== 'UNKNOWN');
+  const verdict: Passability = decisive.length
+    ? decisive.reduce<Passability>(
         (worst, scored) =>
           SEVERITY[scored.effective] > SEVERITY[worst] ? scored.effective : worst,
-        trusted[0]!.effective,
+        decisive[0]!.effective,
       )
     : 'UNKNOWN';
-  const confidence = trusted.reduce(
+  const confidence = decisive.reduce(
     (best, scored) => (scored.effective === verdict ? Math.max(best, scored.weight) : best),
     0,
   );

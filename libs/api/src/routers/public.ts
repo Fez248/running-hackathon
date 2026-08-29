@@ -1,7 +1,7 @@
 import {
   aggregatePassability,
-  boundsAround,
   distanceMeters,
+  radiusBoxes,
   passabilityBatchSchema,
   passabilityQuerySchema,
   type Coordinate,
@@ -23,10 +23,19 @@ import { createTRPCRouter, publicProcedure, type TRPCContext } from '../trpc';
  * Every procedure here is a query, so a fleet integration cannot alter the map.
  */
 
-/** Reports read per call, before the radius filter. */
+/** Reports read for a whole leg while the leg fits in one query. */
 const MAX_SCANNED_REPORTS = 2_000;
-/** Fog cells read per call, only to answer "has anyone been here at all?". */
+/** Fog cells read for a whole leg, only to answer "has anyone been here?". */
 const MAX_SCANNED_CELLS = 5_000;
+/**
+ * Per-waypoint caps for the fallback below. A row cap on a leg-wide query is
+ * only safe while it is not reached: the rows it drops are chosen by the
+ * database, not by distance, so a dense stretch of the leg could otherwise
+ * starve the waypoints after it. When a leg-wide read comes back full, each
+ * waypoint is re-read against its own radius under its own cap instead.
+ */
+const MAX_REPORTS_PER_WAYPOINT = 500;
+const MAX_CELLS_PER_WAYPOINT = 1_000;
 
 export const publicRouter = createTRPCRouter({
   /** Verdict for a single waypoint. */
@@ -41,67 +50,90 @@ export const publicRouter = createTRPCRouter({
 
   /**
    * Verdicts for a route leg, in the order the waypoints were sent. The whole
-   * leg costs two queries however many waypoints it carries.
+   * leg costs two queries however many waypoints it carries, unless a stretch
+   * of it is dense enough to fill one of them.
    */
   passabilityBatch: publicProcedure
     .input(passabilityBatchSchema)
     .query(({ ctx, input }) => verdictsForLeg(ctx.prisma, input)),
 });
 
+type Prisma = TRPCContext['prisma'];
+
+const REPORT_COLUMNS = {
+  // Exactly the columns a verdict needs — no transcript, author or trace.
+  lat: true,
+  lng: true,
+  passability: true,
+  heightCm: true,
+  widthCm: true,
+  confidence: true,
+  createdAt: true,
+} as const;
+
 async function verdictsForLeg(
-  prisma: TRPCContext['prisma'],
+  prisma: Prisma,
   leg: { waypoints: Coordinate[]; radiusM: number; profile: Profile },
 ): Promise<(PassabilityVerdict & Coordinate)[]> {
   const { waypoints, radiusM, profile } = leg;
-  const box = unionBounds(waypoints, radiusM);
-  const within = {
-    lat: { gte: box.minLat, lte: box.maxLat },
-    lng: { gte: box.minLng, lte: box.maxLng },
-  };
+  const neighbourhoods = waypoints.map((waypoint) => coversRadius(waypoint, radiusM));
 
-  const [reports, cells] = await Promise.all([
+  const [legReports, legCells] = await Promise.all([
     prisma.report.findMany({
-      where: { status: 'ACTIVE', ...within },
-      // Exactly the columns a verdict needs — no transcript, author or trace.
-      select: {
-        lat: true,
-        lng: true,
-        passability: true,
-        heightCm: true,
-        widthCm: true,
-        confidence: true,
-        createdAt: true,
-      },
+      where: { status: 'ACTIVE', OR: neighbourhoods.flat() },
+      select: REPORT_COLUMNS,
       orderBy: { createdAt: 'desc' },
       take: MAX_SCANNED_REPORTS,
     }),
     prisma.coverageCell.findMany({
-      where: within,
+      where: { OR: neighbourhoods.flat() },
       select: { lat: true, lng: true },
       take: MAX_SCANNED_CELLS,
     }),
   ]);
 
-  return waypoints.map((waypoint) => {
-    const observations = observationsAround(waypoint, reports, radiusM);
-    // Revealed fog is the only way to tell "walked, nothing to flag" apart from
-    // "nobody has ever been here", and a fleet routes differently on the two.
-    const surveyed =
-      observations.length > 0 || cells.some((cell) => distanceMeters(waypoint, cell) <= radiusM);
+  const reportsComplete = legReports.length < MAX_SCANNED_REPORTS;
+  const cellsComplete = legCells.length < MAX_SCANNED_CELLS;
 
-    return { ...waypoint, ...aggregatePassability(observations, { profile, radiusM, surveyed }) };
-  });
+  return Promise.all(
+    waypoints.map(async (waypoint, index) => {
+      const where = neighbourhoods[index]!;
+      const [nearby, cells] = await Promise.all([
+        reportsComplete
+          ? legReports
+          : prisma.report.findMany({
+              where: { status: 'ACTIVE', OR: where },
+              select: REPORT_COLUMNS,
+              orderBy: { createdAt: 'desc' },
+              take: MAX_REPORTS_PER_WAYPOINT,
+            }),
+        cellsComplete
+          ? legCells
+          : prisma.coverageCell.findMany({
+              where: { OR: where },
+              select: { lat: true, lng: true },
+              take: MAX_CELLS_PER_WAYPOINT,
+            }),
+      ]);
+
+      const observations = observationsAround(waypoint, nearby, radiusM);
+      // Revealed fog is the only way to tell "walked, nothing to flag" apart
+      // from "nobody has ever been here", and a fleet routes differently on
+      // the two.
+      const surveyed =
+        observations.length > 0 || cells.some((cell) => distanceMeters(waypoint, cell) <= radiusM);
+
+      return { ...waypoint, ...aggregatePassability(observations, { profile, radiusM, surveyed }) };
+    }),
+  );
 }
 
-/** Smallest box covering every waypoint's radius, so one query serves the leg. */
-function unionBounds(waypoints: Coordinate[], radiusM: number) {
-  const boxes = waypoints.map((waypoint) => boundsAround(waypoint, radiusM));
-  return {
-    minLat: Math.min(...boxes.map((box) => box.minLat)),
-    maxLat: Math.max(...boxes.map((box) => box.maxLat)),
-    minLng: Math.min(...boxes.map((box) => box.minLng)),
-    maxLng: Math.max(...boxes.map((box) => box.maxLng)),
-  };
+/** `where` fragments whose union covers a waypoint's radius, to be OR-ed. */
+function coversRadius(waypoint: Coordinate, radiusM: number) {
+  return radiusBoxes(waypoint, radiusM).map((box) => ({
+    lat: { gte: box.minLat, lte: box.maxLat },
+    lng: { gte: box.minLng, lte: box.maxLng },
+  }));
 }
 
 interface NearbyReport {

@@ -113,6 +113,25 @@ describe('aggregatePassability', () => {
     expect(answer.sampleSize).toBe(3);
   });
 
+  it('lets a confirmed passable reading stand next to an unjudged report', () => {
+    const answer = verdictFor([
+      observation({ passability: 'UNKNOWN' }),
+      observation({ passability: 'PASSABLE', distanceM: 5 }),
+    ]);
+    // "Someone filed a report but did not judge passability" is not evidence
+    // against the street: it must not bury the reading that did judge it.
+    expect(answer.verdict).toBe('PASSABLE');
+    expect(answer.sampleSize).toBe(2);
+  });
+
+  it('still uses an unjudged report whose measurements decide the question', () => {
+    const answer = verdictFor([
+      observation({ passability: 'UNKNOWN', widthCm: 50 }),
+      observation({ passability: 'PASSABLE', distanceM: 5 }),
+    ]);
+    expect(answer.verdict).toBe('IMPASSABLE');
+  });
+
   it('answers per profile: a 5 cm kerb blocks a wheelchair and not a courier', () => {
     const kerb = [observation({ passability: 'PASSABLE', heightCm: 5 })];
     expect(verdictFor(kerb, { profile: 'WHEELCHAIR' }).verdict).toBe('DIFFICULT');

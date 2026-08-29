@@ -27,6 +27,45 @@ export function boundsAround(center: Coordinate, radiusM: number) {
   };
 }
 
+export interface LatLngBox {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
+/**
+ * `boundsAround` in valid WGS84 ranges: the boxes whose union covers everything
+ * within `radiusM` of the centre. Usually one box; two when the neighbourhood
+ * straddles the antimeridian, since stored longitudes wrap there and a single
+ * min/max interval would either drop the far side of the date line or span the
+ * planet. Latitude is clamped rather than folded over the pole, which widens
+ * longitude to the whole world instead.
+ */
+export function radiusBoxes(center: Coordinate, radiusM: number): LatLngBox[] {
+  const box = boundsAround(center, radiusM);
+  const overPole = box.minLat < -90 || box.maxLat > 90;
+  const minLat = Math.max(-90, box.minLat);
+  const maxLat = Math.min(90, box.maxLat);
+
+  if (overPole || box.maxLng - box.minLng >= 360) {
+    return [{ minLat, maxLat, minLng: -180, maxLng: 180 }];
+  }
+  if (box.maxLng > 180) {
+    return [
+      { minLat, maxLat, minLng: box.minLng, maxLng: 180 },
+      { minLat, maxLat, minLng: -180, maxLng: box.maxLng - 360 },
+    ];
+  }
+  if (box.minLng < -180) {
+    return [
+      { minLat, maxLat, minLng: -180, maxLng: box.maxLng },
+      { minLat, maxLat, minLng: box.minLng + 360, maxLng: 180 },
+    ];
+  }
+  return [{ minLat, maxLat, minLng: box.minLng, maxLng: box.maxLng }];
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 /** Fold an out-of-range longitude into [-180, 180). */

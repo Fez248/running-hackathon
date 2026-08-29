@@ -159,7 +159,7 @@ Privacy and support notes, surfaced in the UI as well:
 
 Routing engines do not want the map's reports, they want a verdict per waypoint. `public.passability`
 answers "can this profile get through here?" for one point, `public.passabilityBatch` for a whole
-route leg (≤ 50 waypoints, two queries in total). Both are tRPC queries, so they are reachable over
+route leg (≤ 50 waypoints, normally two queries in total). Both are tRPC queries, so reachable over
 plain HTTP GET:
 
 ```bash
@@ -179,11 +179,15 @@ How the verdict is reached (`libs/core/src/passability.ts`):
   close a street for a fleet; they still count towards `sampleSize`.
 - The worst remaining verdict wins, evaluated **per profile**: a 5 cm kerb is `PASSABLE` for a
   `COURIER` and `DIFFICULT` for a `WHEELCHAIR`, via the same `passabilityForProfile` rules the map uses.
+  A report whose author did not judge passability does not compete in that comparison — it is not
+  evidence against the street — but its measurements still can rule the street out for a profile.
 - `surveyed` separates the two kinds of `UNKNOWN`: `surveyed: true` means someone walked here (a
   report or revealed fog) and flagged nothing, `surveyed: false` means the map has never seen the
   place. A planner should treat only the second as a blind spot.
 
-`radiusM` is capped at 200 m per waypoint, so no single call can scan a city.
+`radiusM` is capped at 200 m per waypoint, so no single call can scan a city. A leg is read with one
+query per table while that read stays under its row cap; if a dense stretch fills it, each waypoint is
+re-read against its own radius, so a busy neighbourhood cannot starve the waypoints after it.
 
 ## Stack
 

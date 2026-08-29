@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundsAround, clampBounds, distanceMeters, gridKey } from './geo';
+import { boundsAround, clampBounds, distanceMeters, gridKey, radiusBoxes } from './geo';
 import { boundsSchema } from './obstacles';
 import { confidence, passabilityForProfile } from './scoring';
 
@@ -22,6 +22,56 @@ describe('boundsAround', () => {
     expect(b.maxLat).toBeGreaterThan(52.52);
     expect(b.minLng).toBeLessThan(13.4);
     expect(b.maxLng).toBeGreaterThan(13.4);
+  });
+});
+
+describe('radiusBoxes', () => {
+  const contains = (
+    boxes: ReturnType<typeof radiusBoxes>,
+    point: { lat: number; lng: number },
+  ) =>
+    boxes.some(
+      (box) =>
+        point.lat >= box.minLat &&
+        point.lat <= box.maxLat &&
+        point.lng >= box.minLng &&
+        point.lng <= box.maxLng,
+    );
+
+  it('is one box away from the antimeridian', () => {
+    const boxes = radiusBoxes({ lat: 52.52, lng: 13.4 }, 100);
+    expect(boxes).toHaveLength(1);
+    expect(contains(boxes, { lat: 52.52, lng: 13.4 })).toBe(true);
+  });
+
+  it('splits at the antimeridian instead of dropping the far side', () => {
+    const east = radiusBoxes({ lat: -16.9, lng: 179.9995 }, 100);
+    expect(east).toHaveLength(2);
+    // A point ~50 m east of the waypoint is stored as a negative longitude.
+    expect(contains(east, { lat: -16.9, lng: -179.9999 })).toBe(true);
+
+    const west = radiusBoxes({ lat: -16.9, lng: -179.9995 }, 100);
+    expect(west).toHaveLength(2);
+    expect(contains(west, { lat: -16.9, lng: 179.9999 })).toBe(true);
+  });
+
+  it('stays inside valid coordinate ranges', () => {
+    for (const boxes of [
+      radiusBoxes({ lat: -16.9, lng: 179.9995 }, 200),
+      radiusBoxes({ lat: 89.999, lng: 0 }, 200),
+    ]) {
+      for (const box of boxes) {
+        expect(box.minLat).toBeGreaterThanOrEqual(-90);
+        expect(box.maxLat).toBeLessThanOrEqual(90);
+        expect(box.minLng).toBeGreaterThanOrEqual(-180);
+        expect(box.maxLng).toBeLessThanOrEqual(180);
+      }
+    }
+  });
+
+  it('widens to the whole world at the pole, where every longitude is near', () => {
+    const boxes = radiusBoxes({ lat: 89.9999, lng: 12 }, 200);
+    expect(boxes).toEqual([{ minLat: expect.any(Number), maxLat: 90, minLng: -180, maxLng: 180 }]);
   });
 });
 
