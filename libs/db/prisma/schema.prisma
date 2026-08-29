@@ -151,6 +151,38 @@ model Trace {
   @@index([userId])
 }
 
+/// One recording uploaded to a Sensor Logger Study, tracked from webhook to scan.
+/// The webhook is attempted once per upload, so this row is both the dedupe key
+/// (`studyId` + `uploadId`) and the work queue the bridge worker claims from.
+/// The Study `secretCode` is deliberately absent: it is a credential, and the
+/// worker reads its own copy from the environment.
+model SensorLoggerUpload {
+  id       String @id @default(cuid())
+  studyId  String
+  uploadId String
+  /// PENDING | CLAIMED | DONE | FAILED
+  status   String @default("PENDING")
+  /// Claim count, so a recording that keeps failing stops being retried.
+  attempts Int    @default(0)
+
+  claimedAt   DateTime?
+  completedAt DateTime?
+  /// Redacted failure reason from the worker; never contains the secret code.
+  error       String?
+
+  /// Scan outcome, kept small: monitoring needs counts, not the payload.
+  bytes        Int?
+  findingCount Int?
+  reportCount  Int?
+  quality      String?
+
+  receivedAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([studyId, uploadId])
+  @@index([status, receivedAt])
+}
+
 /// A fog-of-war cell revealed by walking/running through it.
 /// `cellKey` comes from @sidewalk/core fogCellKey, so the grid is identical on
 /// every client and the key is the natural unique index SQLite can serve.
