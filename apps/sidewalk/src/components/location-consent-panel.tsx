@@ -70,16 +70,13 @@ export function LocationConsentPanel({ permission, runActive }: LocationConsentP
           <p className="muted">
             Chrome will not ask twice. To turn it back on: click the icon on the left of the address
             bar → <strong>Site settings</strong> → <strong>Location</strong> →{' '}
-            <strong>Allow</strong>.{' '}
-            {observable ? 'Then re-check below — no reload needed.' : 'Then reload this page.'}
+            <strong>Allow</strong>. Then use the button below — no reload needed.
           </p>
-          {observable ? (
-            <div className="row">
-              <button type="button" onClick={() => void permission.recheck()}>
-                Re-check permission
-              </button>
-            </div>
-          ) : null}
+          <div className="row">
+            <button type="button" onClick={() => void permission.recheck()}>
+              {observable ? 'Re-check permission' : 'I changed it — ask again'}
+            </button>
+          </div>
           <p className="muted">
             Prefer not to share location? Reports can still be typed, but they need a live run, so
             the map stays read-only until access is granted.

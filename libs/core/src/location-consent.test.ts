@@ -110,3 +110,37 @@ describe('observed states', () => {
     );
   });
 });
+
+describe('retry-allowed', () => {
+  it('re-opens a denial that no Permissions API can confirm is still in force', () => {
+    let record = reduceLocationConsent(initialLocationConsent(), { type: 'requested', at: 1_000 });
+    record = reduceLocationConsent(record, { type: 'failed', failure: 'denied' });
+    expect(canRequestLocation(record, 2_000)).toBe(false);
+
+    const reopened = reduceLocationConsent(record, { type: 'retry-allowed' });
+    expect(reopened.state).toBe('prompt');
+    expect(reopened.lastFailure).toBeNull();
+    expect(canRequestLocation(reopened, 2_000)).toBe(true);
+  });
+
+  it('lands back on denied when the browser is still blocking', () => {
+    const reopened = reduceLocationConsent(
+      reduceLocationConsent(initialLocationConsent(), { type: 'failed', failure: 'denied' }),
+      { type: 'retry-allowed' },
+    );
+    const reDenied = reduceLocationConsent(reopened, { type: 'failed', failure: 'denied' });
+    expect(reDenied.state).toBe('denied');
+    expect(canRequestLocation(reDenied, 5_000)).toBe(false);
+  });
+
+  it('leaves states the user cannot fix in settings alone', () => {
+    const unavailable = reduceLocationConsent(initialLocationConsent(), {
+      type: 'failed',
+      failure: 'unavailable',
+    });
+    expect(reduceLocationConsent(unavailable, { type: 'retry-allowed' })).toEqual(unavailable);
+
+    const granted = reduceLocationConsent(initialLocationConsent(), { type: 'granted' });
+    expect(reduceLocationConsent(granted, { type: 'retry-allowed' })).toEqual(granted);
+  });
+});

@@ -108,7 +108,15 @@ export type LocationConsentEvent =
   | { type: 'granted' }
   | { type: 'failed'; failure: LocationConsentFailure }
   /** The Permissions API reported the browser-held state without prompting. */
-  | { type: 'observed'; state: LocationPermissionState };
+  | { type: 'observed'; state: LocationPermissionState }
+  /**
+   * The user says they changed the browser setting. Without the Permissions API
+   * there is no way to confirm that, and a remembered denial would otherwise be
+   * permanent, so their word re-opens exactly one attempt. It cannot loop: the
+   * event only ever comes from a button press, and a still-denied request lands
+   * back on `denied`.
+   */
+  | { type: 'retry-allowed' };
 
 export function reduceLocationConsent(
   record: LocationConsentRecord,
@@ -148,6 +156,12 @@ export function reduceLocationConsent(
         failedAttempts: cleared ? 0 : record.failedAttempts,
         lastFailure: cleared ? null : record.lastFailure,
       };
+    }
+    case 'retry-allowed': {
+      // `unavailable` means there is no API to call at all, so nothing the user
+      // does in settings can help; only a denial is worth re-opening.
+      if (record.state !== 'denied') return record;
+      return { state: 'prompt', lastRequestedAt: null, failedAttempts: 0, lastFailure: null };
     }
   }
 }

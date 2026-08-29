@@ -73,7 +73,11 @@ export interface LocationPermission {
   observable: boolean;
   /** Raises the browser prompt. Must be called from a user gesture. */
   request: () => Promise<LocationPermissionState>;
-  /** Re-reads the browser-held state without prompting (the "I fixed it" path). */
+  /**
+   * The "I changed it in settings" path. Where the Permissions API can confirm
+   * the browser-held state it is read without prompting; where it cannot, the
+   * remembered denial is re-opened so the user can ask once more.
+   */
   recheck: () => Promise<LocationPermissionState>;
 }
 
@@ -85,6 +89,9 @@ export function useLocationPermission(): LocationPermission {
   const [observable, setObservable] = useState(false);
   const recordRef = useRef(record);
   recordRef.current = record;
+  // Only known after the first client render, and read inside callbacks.
+  const observableRef = useRef(false);
+  observableRef.current = observable;
 
   const apply = useCallback((event: LocationConsentEvent) => {
     const next = reduceLocationConsent(recordRef.current, event);
@@ -98,12 +105,19 @@ export function useLocationPermission(): LocationPermission {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       return apply({ type: 'failed', failure: 'unavailable' }).state;
     }
-    if (!navigator.permissions?.query) return recordRef.current.state;
+    if (!navigator.permissions?.query) {
+      observableRef.current = false;
+      setObservable(false);
+      return recordRef.current.state;
+    }
     try {
       const status = await navigator.permissions.query({ name: 'geolocation' });
       return apply({ type: 'observed', state: status.state as LocationPermissionState }).state;
     } catch {
-      // Some browsers reject the geolocation descriptor; the record stands.
+      // Some browsers reject the geolocation descriptor. The record stands, but
+      // the browser state is not actually observable here.
+      observableRef.current = false;
+      setObservable(false);
       return recordRef.current.state;
     }
   }, [apply]);
@@ -124,17 +138,24 @@ export function useLocationPermission(): LocationPermission {
   useEffect(() => {
     if (typeof navigator === 'undefined' || !navigator.permissions?.query) return;
     let status: PermissionStatus | null = null;
+    // The query can resolve after unmount; without this the continuation would
+    // subscribe a listener nothing ever removes.
+    let cancelled = false;
     const onChange = () => {
       if (status) apply({ type: 'observed', state: status.state as LocationPermissionState });
     };
     void navigator.permissions
       .query({ name: 'geolocation' })
       .then((result) => {
+        if (cancelled) return;
         status = result;
         result.addEventListener('change', onChange);
       })
       .catch(() => undefined);
-    return () => status?.removeEventListener('change', onChange);
+    return () => {
+      cancelled = true;
+      status?.removeEventListener('change', onChange);
+    };
   }, [apply]);
 
   // Only ticks while a cooldown is actually pending, so the button re-enables
@@ -188,10 +209,17 @@ export function useLocationPermission(): LocationPermission {
 
   const recheck = useCallback(async () => {
     setError(null);
-    const state = await observe();
+    const observed = await observe();
     setNow(Date.now());
-    return state;
-  }, [observe]);
+    // Firefox and older WebKit have no queryable geolocation permission, so a
+    // stored denial cannot be reconciled with the browser and would otherwise
+    // block runs for good — even after the user allowed the site again. Trust
+    // the user instead and let them raise the prompt one more time.
+    if (observed === 'denied' && !observableRef.current) {
+      return apply({ type: 'retry-allowed' }).state;
+    }
+    return observed;
+  }, [apply, observe]);
 
   return {
     state: record.state,
