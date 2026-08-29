@@ -160,7 +160,11 @@ def assess(rec: Recording) -> CaptureQuality:
 
     if rec.gps is not None and rec.gps.t.size >= 2:
         gdt = float(np.median(np.diff(rec.gps.t)))
-        q.gps_rate_hz = 1.0 / gdt if gdt > 0 else None
+        if gdt <= 0:
+            # A zero interval also makes the time-based route smoothing unbounded.
+            _fail(q, "GPS timestamps do not increase; the track has no usable sampling interval")
+            return q
+        q.gps_rate_hz = 1.0 / gdt
         q.route_length_m = float(cumulative_distance(rec.gps, smooth_s=5.0)[-1])
         if rec.gps.accuracy_m is not None and rec.gps.accuracy_m.size:
             q.gps_accuracy_m = float(np.median(rec.gps.accuracy_m))

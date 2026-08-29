@@ -249,6 +249,32 @@ button:disabled {
   display: none;
 }
 
+.voice-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.meter {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+}
+
+.meter .bar {
+  width: 5px;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(148, 163, 184, 0.25);
+  transition: background 80ms linear;
+}
+
+.meter .bar[data-on] {
+  background: #38bdf8;
+}
+
 .interim {
   font-size: 13px;
   font-style: italic;

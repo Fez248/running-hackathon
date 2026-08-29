@@ -201,7 +201,7 @@ def format_report(result: ScanResult) -> str:
         f"source        {result.source}  ({result.format})",
         f"capture       {q.fs_hz:.0f} Hz IMU, {q.duration_s:.0f} s, jitter p95 {q.jitter_ms:.1f} ms"
         + (
-            f", GPS {q.gps_rate_hz:.1f} Hz"
+            (f", GPS {q.gps_rate_hz:.1f} Hz" if q.gps_rate_hz is not None else ", GPS rate unknown")
             + (f" @ {q.gps_accuracy_m:.1f} m" if q.gps_accuracy_m is not None else "")
             + (f", route {q.route_length_m:.0f} m" if q.route_length_m is not None else "")
             if q.gps_present

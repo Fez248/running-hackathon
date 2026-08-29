@@ -1,7 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { parseVoiceReport, type ParsedVoiceReport } from '@sidewalk/core';
+import {
+  VOICE_ERROR_MESSAGES,
+  decideVoiceRestart,
+  inputLevel,
+  isTerminalVoiceError,
+  parseVoiceReport,
+  voiceErrorKind,
+  type ParsedVoiceReport,
+} from '@sidewalk/core';
 
 /**
  * Ambient voice dictation with the Web Speech API.
@@ -14,6 +22,12 @@ import { parseVoiceReport, type ParsedVoiceReport } from '@sidewalk/core';
  *
  * `continuous` keeps the recogniser open for a whole run and `interimResults`
  * gives the live caption; only final results are parsed into reports.
+ *
+ * Microphone access is taken explicitly with `getUserMedia` before the recogniser
+ * starts. Recognition would raise its own prompt, but then a refusal surfaces as
+ * a silent recogniser, and the same stream drives the input-level meter — which
+ * is the only way for a runner to tell "nobody is listening" apart from "the wind
+ * is louder than I am".
  */
 
 // Minimal structural types: TS's DOM lib does not ship SpeechRecognition.
@@ -57,6 +71,8 @@ function recognitionCtor(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+export type MicrophoneState = 'unknown' | 'granted' | 'denied' | 'unavailable';
+
 export interface VoiceUtterance {
   id: string;
   transcript: string;
@@ -71,20 +87,105 @@ export interface UseVoiceReporterOptions {
   onReport: (utterance: VoiceUtterance & { parsed: ParsedVoiceReport }) => void;
 }
 
+/** How often the level meter is allowed to re-render. */
+const LEVEL_INTERVAL_MS = 120;
+
 export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterOptions) {
   const [supported, setSupported] = useState(false);
+  const [micState, setMicState] = useState<MicrophoneState>('unknown');
   const [listening, setListening] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [interim, setInterim] = useState('');
+  const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [utterances, setUtterances] = useState<VoiceUtterance[]>([]);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const wantListeningRef = useRef(false);
+  const failuresRef = useRef(0);
+  const sessionStartedAtRef = useRef(0);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const frameRef = useRef<number | null>(null);
   const onReportRef = useRef(onReport);
   onReportRef.current = onReport;
 
   useEffect(() => {
     setSupported(recognitionCtor() != null);
+  }, []);
+
+  /** Follows a permission the user changed in browser settings mid-run. */
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return;
+
+    let status: PermissionStatus | null = null;
+    let cancelled = false;
+    const onChange = () => {
+      if (!status) return;
+      if (status.state === 'granted') setMicState('granted');
+      if (status.state === 'denied') setMicState('denied');
+      if (status.state === 'prompt') setMicState('unknown');
+    };
+
+    void navigator.permissions
+      // `microphone` is not in every browser's PermissionName union, and a
+      // browser that does not know the name rejects the query.
+      .query({ name: 'microphone' as PermissionName })
+      .then((result) => {
+        if (cancelled) return;
+        status = result;
+        onChange();
+        result.addEventListener('change', onChange);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      status?.removeEventListener('change', onChange);
+    };
+  }, []);
+
+  const releaseMic = useCallback(() => {
+    if (frameRef.current != null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    void audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    // Stopping the tracks is what clears the browser's recording indicator; a
+    // held stream tells the runner they are still being recorded.
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setLevel(0);
+  }, []);
+
+  /** Drives the level meter from the same stream the recogniser is hearing. */
+  const startMeter = useCallback((stream: MediaStream) => {
+    const Ctor =
+      typeof window === 'undefined'
+        ? undefined
+        : (window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext);
+    if (!Ctor) return;
+
+    const context = new Ctor();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    context.createMediaStreamSource(stream).connect(analyser);
+    audioContextRef.current = context;
+
+    const samples = new Float32Array(analyser.fftSize);
+    let lastAt = 0;
+    const tick = (now: number) => {
+      frameRef.current = requestAnimationFrame(tick);
+      if (now - lastAt < LEVEL_INTERVAL_MS) return;
+      lastAt = now;
+      analyser.getFloatTimeDomainData(samples);
+      setLevel(inputLevel(samples));
+    };
+    frameRef.current = requestAnimationFrame(tick);
   }, []);
 
   const handleFinal = useCallback((transcript: string, confidence: number | null) => {
@@ -102,11 +203,27 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
     if (parsed) onReportRef.current({ ...utterance, parsed });
   }, []);
 
-  const startRecognition = useCallback(() => {
+  const stopRecognition = useCallback(() => {
+    wantListeningRef.current = false;
+    failuresRef.current = 0;
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    setInterim('');
+    setListening(false);
+    setStarting(false);
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    releaseMic();
+  }, [releaseMic]);
+
+  /** Builds and starts a recogniser; the mic stream must already be held. */
+  const spawnRecognition = useCallback((): boolean => {
     const Ctor = recognitionCtor();
     if (!Ctor) {
       setError('This browser does not support the Web Speech API.');
-      return;
+      return false;
     }
 
     // A second start without a stop would leave the previous recogniser
@@ -137,15 +254,16 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
     };
 
     recognition.onerror = (event) => {
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        wantListeningRef.current = false;
-        setListening(false);
-        setError('Microphone permission denied — voice reporting is off.');
+      const kind = voiceErrorKind(event.error);
+      if (isTerminalVoiceError(kind)) {
+        if (kind === 'not-allowed' || kind === 'service-not-allowed') setMicState('denied');
+        setError(VOICE_ERROR_MESSAGES[kind]);
+        stopRecognition();
         return;
       }
-      if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        setError(event.message || `Speech recognition error: ${event.error}`);
-      }
+      // Silence and an aborted session are the run's normal state, not errors.
+      if (kind === 'no-speech' || kind === 'aborted') return;
+      setError(kind === 'unknown' ? event.message || VOICE_ERROR_MESSAGES.unknown : VOICE_ERROR_MESSAGES[kind]);
     };
 
     // Chrome ends the session after a pause even with continuous = true.
@@ -154,40 +272,134 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
       // itself off the flag that now belongs to its replacement.
       if (recognitionRef.current !== recognition) return;
       setInterim('');
-      if (wantListeningRef.current) {
+
+      const decision = decideVoiceRestart({
+        wantListening: wantListeningRef.current,
+        sessionMs: Date.now() - sessionStartedAtRef.current,
+        consecutiveFailures: failuresRef.current,
+      });
+      failuresRef.current = decision.failures;
+
+      if (!decision.restart) {
+        if (decision.message) setError(decision.message);
+        stopRecognition();
+        return;
+      }
+
+      const resume = () => {
+        restartTimerRef.current = null;
+        if (recognitionRef.current !== recognition || !wantListeningRef.current) return;
         try {
+          sessionStartedAtRef.current = Date.now();
           recognition.start();
         } catch {
-          setListening(false);
+          stopRecognition();
         }
-      } else {
-        setListening(false);
-      }
+      };
+      if (decision.delayMs === 0) resume();
+      else restartTimerRef.current = setTimeout(resume, decision.delayMs);
     };
 
     recognitionRef.current = recognition;
     try {
+      sessionStartedAtRef.current = Date.now();
       recognition.start();
-      wantListeningRef.current = true;
-      setListening(true);
-      setError(null);
+      return true;
     } catch (cause) {
+      recognitionRef.current = null;
       setError(cause instanceof Error ? cause.message : 'Could not start speech recognition.');
+      return false;
     }
-  }, [handleFinal, lang]);
+  }, [handleFinal, lang, stopRecognition]);
 
-  const stopRecognition = useCallback(() => {
-    wantListeningRef.current = false;
+  /**
+   * Takes the microphone, then starts recognising. Must be called from a user
+   * gesture so the browser attributes the prompt to the tap.
+   */
+  const startRecognition = useCallback(async (): Promise<boolean> => {
+    if (wantListeningRef.current) return true;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setMicState('unavailable');
+      setError('This browser cannot record audio (a secure origin is required) — type reports instead.');
+      return false;
+    }
+
+    setStarting(true);
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          // Street noise and wind, not a studio: let the browser's own
+          // processing clean up the signal before it is recognised.
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      streamRef.current = stream;
+      setMicState('granted');
+      startMeter(stream);
+
+      wantListeningRef.current = true;
+      failuresRef.current = 0;
+      if (!spawnRecognition()) {
+        stopRecognition();
+        return false;
+      }
+      setListening(true);
+      return true;
+    } catch (cause) {
+      const name = cause instanceof Error ? cause.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        setMicState('denied');
+        setError(VOICE_ERROR_MESSAGES['not-allowed']);
+      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        setMicState('unavailable');
+        setError(VOICE_ERROR_MESSAGES['audio-capture']);
+      } else {
+        setError(cause instanceof Error ? cause.message : 'Could not open the microphone.');
+      }
+      releaseMic();
+      wantListeningRef.current = false;
+      return false;
+    } finally {
+      setStarting(false);
+    }
+  }, [releaseMic, spawnRecognition, startMeter, stopRecognition]);
+
+  /**
+   * Drops the phrase in progress without ending the session — for a misspoken
+   * report, where waiting for the recogniser to finalise nonsense and then
+   * ignoring the result is the worse experience.
+   */
+  const cancelPhrase = useCallback(() => {
+    if (!wantListeningRef.current) return;
     setInterim('');
-    setListening(false);
+    setError(null);
+    // Aborting drops the buffered audio; `onend` then restarts the session
+    // because the user still wants to listen.
     recognitionRef.current?.abort();
     recognitionRef.current = null;
+    failuresRef.current = 0;
+    spawnRecognition();
+  }, [spawnRecognition]);
+
+  /** Lets the user re-ask after fixing the permission in browser settings. */
+  const retryMic = useCallback(() => {
+    setMicState('unknown');
+    setError(null);
   }, []);
 
-  useEffect(() => () => {
-    wantListeningRef.current = false;
-    recognitionRef.current?.abort();
-  }, []);
+  useEffect(
+    () => () => {
+      wantListeningRef.current = false;
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+      releaseMic();
+    },
+    [releaseMic],
+  );
 
   /** Fallback for browsers without speech recognition (or a noisy street). */
   const submitTyped = useCallback(
@@ -199,12 +411,17 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
 
   return {
     supported,
+    micState,
     listening,
+    starting,
     interim,
+    level,
     error,
     utterances,
     startRecognition,
     stopRecognition,
+    cancelPhrase,
+    retryMic,
     submitTyped,
     clearUtterances,
   };
