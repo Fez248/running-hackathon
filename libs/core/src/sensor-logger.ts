@@ -13,7 +13,12 @@
  */
 
 import { z } from 'zod';
-import { latitudeSchema, longitudeSchema, type CreateReportInput } from './obstacles';
+import {
+  latitudeSchema,
+  longitudeSchema,
+  reservedClientReportId,
+  type CreateReportInput,
+} from './obstacles';
 
 /** Identifiers are opaque strings upstream; bound them so a payload cannot be a blob. */
 const identifierSchema = z
@@ -117,7 +122,10 @@ export const SENSOR_LOGGER_REPORT_ID_PREFIX = 'sl:';
 
 /** Whether a client-supplied `clientReportId` trespasses on a reserved namespace. */
 export function isReservedClientReportId(clientReportId: string): boolean {
-  return clientReportId.startsWith(SENSOR_LOGGER_REPORT_ID_PREFIX);
+  return (
+    clientReportId.startsWith(SENSOR_LOGGER_REPORT_ID_PREFIX) ||
+    reservedClientReportId(clientReportId)
+  );
 }
 
 /**
