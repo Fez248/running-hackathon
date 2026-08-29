@@ -105,6 +105,12 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
   const failuresRef = useRef(0);
   const sessionStartedAtRef = useRef(0);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Bumped by anything that ends a session. `getUserMedia` can resolve after the
+   * run has stopped or the component has unmounted, and that late stream would
+   * otherwise be kept and recognised from.
+   */
+  const generationRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -206,6 +212,7 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
   const stopRecognition = useCallback(() => {
     wantListeningRef.current = false;
     failuresRef.current = 0;
+    generationRef.current += 1;
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
@@ -326,6 +333,7 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
 
     setStarting(true);
     setError(null);
+    const generation = generationRef.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -336,6 +344,10 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
           autoGainControl: true,
         },
       });
+      if (generation !== generationRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
       streamRef.current = stream;
       setMicState('granted');
       startMeter(stream);
@@ -393,6 +405,7 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
   useEffect(
     () => () => {
       wantListeningRef.current = false;
+      generationRef.current += 1;
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
       recognitionRef.current?.abort();
       recognitionRef.current = null;
