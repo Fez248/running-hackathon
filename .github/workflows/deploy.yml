@@ -1,0 +1,29 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-production
+  cancel-in-progress: false
+
+jobs:
+  vercel:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://sidewalk-map-gamma.vercel.app
+    env:
+      VERCEL_ORG_ID: team_GlF6QXx6tsCBdWVOWgd1Kz1Z
+      VERCEL_PROJECT_ID: prj_lO6bPSTCNevWjXm9BFMDWNGEXeG6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm i -g vercel@59.3.0
+      - run: vercel deploy --prod --yes --token "$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
