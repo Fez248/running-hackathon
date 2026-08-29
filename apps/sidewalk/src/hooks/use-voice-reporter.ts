@@ -349,7 +349,10 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
       });
       if (!isCurrent()) {
         stream.getTracks().forEach((track) => track.stop());
-        return false;
+        // Not `false`: this attempt's caller is no longer the authority on the
+        // toggle, and reporting failure would switch off a replacement session
+        // that is listening.
+        return wantListeningRef.current;
       }
       streamRef.current = stream;
       setMicState('granted');
@@ -364,7 +367,7 @@ export function useVoiceReporter({ lang = 'en-US', onReport }: UseVoiceReporterO
       setListening(true);
       return true;
     } catch (cause) {
-      if (!isCurrent()) return false;
+      if (!isCurrent()) return wantListeningRef.current;
       const name = cause instanceof Error ? cause.name : '';
       if (name === 'NotAllowedError' || name === 'SecurityError') {
         setMicState('denied');
