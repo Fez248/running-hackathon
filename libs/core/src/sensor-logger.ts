@@ -113,11 +113,11 @@ function fnv1a(text: string): string {
  * ids are refused in it, so an app client cannot pre-create (and thereby hijack,
  * since creation upserts) the row a future scan will write.
  */
-export const SENSOR_REPORT_ID_PREFIX = 'sl:';
+export const SENSOR_LOGGER_REPORT_ID_PREFIX = 'sl:';
 
 /** Whether a client-supplied `clientReportId` trespasses on a reserved namespace. */
 export function isReservedClientReportId(clientReportId: string): boolean {
-  return clientReportId.startsWith(SENSOR_REPORT_ID_PREFIX);
+  return clientReportId.startsWith(SENSOR_LOGGER_REPORT_ID_PREFIX);
 }
 
 /**
@@ -130,9 +130,9 @@ export function findingReportId(
   payload: { studyId: string; uploadId: string },
   findingIndex: number,
 ): string {
-  const readable = `${SENSOR_REPORT_ID_PREFIX}${payload.studyId}:${payload.uploadId}:${findingIndex}`;
+  const readable = `${SENSOR_LOGGER_REPORT_ID_PREFIX}${payload.studyId}:${payload.uploadId}:${findingIndex}`;
   if (readable.length <= 64) return readable;
-  return `${SENSOR_REPORT_ID_PREFIX}${fnv1a(uploadKey(payload))}:${findingIndex}`;
+  return `${SENSOR_LOGGER_REPORT_ID_PREFIX}${fnv1a(uploadKey(payload))}:${findingIndex}`;
 }
 
 /** Bridge finding polarity -> label, as emitted by `bridge.scan.DIRECTION_LABELS`. */
