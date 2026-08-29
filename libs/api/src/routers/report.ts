@@ -215,7 +215,12 @@ export const reportRouter = createTRPCRouter({
       data: {
         agreeCount,
         disagreeCount,
-        confidence: confidence({ agreeCount, disagreeCount, accuracyM: report.accuracyM }),
+        // Votes cannot buy away the parser's doubt: until a human has read the
+        // transcript, a half-understood dictation stays discounted however many
+        // people agree with it.
+        confidence:
+          confidence({ agreeCount, disagreeCount, accuracyM: report.accuracyM }) *
+          (report.reviewedAt ? 1 : (report.parseConfidence ?? 1)),
         status: disagreeCount >= 3 && disagreeCount > agreeCount * 2 ? 'REJECTED' : report.status,
       },
     });

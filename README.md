@@ -121,6 +121,33 @@ accepted GPS fix and saved as a report with `source: 'VOICE'` plus the raw trans
 deliberately conservative: an utterance that names no sidewalk feature is ignored rather than
 becoming a marker.
 
+### Voice review queue
+
+The parser is keyword based, so it is confidently right about "steps ahead, impassable" and only
+plausibly right about "watch out, kind of rough here". Publishing the second straight to the map puts
+a guess in front of a wheelchair user; dropping it throws away a real observation. So a parse whose
+confidence falls below `REVIEW_CONFIDENCE_FLOOR` (0.5) is saved with `status: 'PENDING_REVIEW'`
+instead of `ACTIVE`, together with the transcript and the parser's own confidence. Such a report is
+invisible to the map and to the active-report count until it is judged, and the reporter is told it
+was held rather than logged.
+
+`review.queue` pages through the backlog, oldest first — the runner who has waited longest is served
+first — giving a reviewer what is needed to judge a report: the transcript, what the parser
+understood, the phrase it latched onto, and where it was spoken. `review.decide` then:
+
+- **approve** — publish it as it stands;
+- **correct** — publish it with the fields the parser got wrong replaced (a reviewer listening to the
+  transcript is the authority on what was said, so a correction is stored verbatim, not re-parsed);
+- **reject** — keep it as `REJECTED` with an optional reason, so the parser's failure modes stay
+  auditable instead of being deleted.
+
+A reviewed report keeps only the confidence its GPS accuracy and votes earn it: the parse penalty is
+lifted because a human has now read the transcript. Until then the penalty survives voting, so
+agreement cannot buy away the parser's doubt. Deciding requires an identified contributor (a queue
+anyone can empty is not a quality gate) and is idempotent by status, so of two reviewers who open the
+same report only the first decides — the second gets `CONFLICT` rather than silently overwriting a
+correction with an approval.
+
 Privacy and support notes, surfaced in the UI as well:
 
 - The microphone only runs while you explicitly enable it, and stops when the run stops.
