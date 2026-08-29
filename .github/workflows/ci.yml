@@ -33,6 +33,7 @@ jobs:
       - run: pip install -e libs/imukit -e 'apps/bridge[dev]'
       - run: python -m pytest -q
         working-directory: apps/bridge
-      - run: python -m ruff check apps/bridge libs/imukit
+      - run: python -m ruff check . ../../libs/imukit
+        working-directory: apps/bridge
       - run: python -m bridge.cli scan --demo --out /tmp/findings.json
         working-directory: apps/bridge
