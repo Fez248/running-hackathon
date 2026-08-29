@@ -210,7 +210,7 @@ def test_feedback_markdown_reports_findings_and_refuses_to_conclude_on_bad_captu
     assert md.startswith("# Sidewalk Map")
     assert "steps/min" in md and "confidence" in md
 
-    trace_bad, gps_bad, _ = simulate_pass(SurfaceScenario(seed=3, fs=50.0))
+    trace_bad, gps_bad, _ = simulate_pass(SurfaceScenario(seed=3, fs=30.0))
     write_export_dir(tmp_path / "bad", trace_bad, gps_bad)
     bad, _ = scan_recording(load_recording(tmp_path / "bad"))
     bad_md = feedback_markdown(bad)
