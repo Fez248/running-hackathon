@@ -57,6 +57,17 @@ const DEFAULT_VIEWPORT: Viewport = {
 /** While a run is active, reports and fog refresh on this interval. */
 const LIVE_REFETCH_MS = 4_000;
 
+/**
+ * A profile is who the map is filtered *for* — the people who rely on the
+ * obstacles you log — not who is out mapping.
+ */
+const PROFILE_LABELS: Record<Profile, string> = {
+  WHEELCHAIR: 'Wheelchairs',
+  STROLLER: 'Strollers',
+  COURIER: 'Couriers',
+  DELIVERY_ROBOT: 'Delivery robots',
+};
+
 export function MapWorkspace() {
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [profile, setProfile] = useState<Profile>('WHEELCHAIR');
@@ -147,7 +158,7 @@ export function MapWorkspace() {
       if (!position) {
         // Refusing a stale fix: after a run ends the last position is history, not
         // where the reporter is standing.
-        setVoiceStatus('Heard a report but there is no live GPS fix — start a run first.');
+        setVoiceStatus('Heard a report but there is no live GPS fix — tap Start Exploring first.');
         return;
       }
       createFromVoiceRef.current.mutate({
@@ -242,8 +253,8 @@ export function MapWorkspace() {
       <aside className="sidebar">
         <h1>Sidewalk Map</h1>
         <p className="tagline">
-          Curbs, steps, roadworks and passable crossings — crowdsourced by runners and riders while
-          they move. Streets you have not surveyed stay under the fog.
+          Run, jog or walk your city and map the obstacles you pass. Every street you cover clears
+          the fog.
         </p>
 
         <LocationConsentPanel permission={locationPermission} runActive={running} />
@@ -281,7 +292,7 @@ export function MapWorkspace() {
 
         <div className="card">
           <h2>Filters</h2>
-          <label htmlFor="profile">I travel as</label>
+          <label htmlFor="profile">Mapping obstacles for</label>
           <select
             id="profile"
             value={profile}
@@ -289,13 +300,14 @@ export function MapWorkspace() {
           >
             {PROFILES.map((p) => (
               <option key={p} value={p}>
-                {p.replace('_', ' ').toLowerCase()}
+                {PROFILE_LABELS[p]}
               </option>
             ))}
           </select>
+          <p className="muted">You map on foot — this is who the map is shown for.</p>
 
           <span className="field-label" id="kind-filter-label">
-            Filter features
+            Obstacle types
           </span>
           <div className="chips" role="group" aria-labelledby="kind-filter-label">
             {OBSTACLE_KINDS.map((kind) => (
@@ -321,11 +333,11 @@ export function MapWorkspace() {
         />
 
         <div className="card">
-          <h2>Reports in view</h2>
+          <h2>Mapped here</h2>
           <p className="muted" role="status">
             {reports.isPending
-              ? 'Loading reports…'
-              : `${markers.length} ${markers.length === 1 ? 'report' : 'reports'} in view`}
+              ? 'Loading…'
+              : `${markers.length} ${markers.length === 1 ? 'obstacle' : 'obstacles'} in view`}
           </p>
           {reports.error ? (
             <p className="error" role="alert">
@@ -333,9 +345,7 @@ export function MapWorkspace() {
             </p>
           ) : null}
           {!reports.isPending && !reports.error && !markers.length ? (
-            <p className="muted">
-              Nothing mapped here yet — tap the map to place a report, or pan to another street.
-            </p>
+            <p className="muted">Nothing mapped here yet — tap the map to add the first obstacle.</p>
           ) : null}
           {markers.map((report) => (
             <div className="report" key={report.id}>
@@ -356,9 +366,9 @@ export function MapWorkspace() {
           ))}
         </div>
 
-        <ScanPanel />
-
         <StatsPanel />
+
+        <ScanPanel />
       </aside>
     </main>
   );

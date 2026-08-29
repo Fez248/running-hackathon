@@ -103,6 +103,20 @@ h3 {
   background: #12151c;
 }
 
+/* Secondary tooling stays folded away so the sidebar reads at a glance. */
+details.card > summary {
+  cursor: pointer;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+details.card[open] > summary {
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
 label,
 .field-label {
   display: block;

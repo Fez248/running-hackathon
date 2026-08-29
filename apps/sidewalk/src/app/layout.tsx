@@ -6,7 +6,7 @@ import { TRPCProvider } from '@/trpc/provider';
 export const metadata: Metadata = {
   title: 'Sidewalk Map',
   description:
-    'Crowdsourced map of curbs, steps, roadworks and passable crossings for wheelchair users, stroller users, couriers and delivery robots.',
+    'Runners, joggers and walkers mapping the curbs, steps and roadworks of their city — so wheelchairs, strollers and delivery robots know where they can go.',
   applicationName: 'Sidewalk Map',
   manifest: '/manifest.webmanifest',
   appleWebApp: {

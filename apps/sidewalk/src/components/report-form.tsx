@@ -96,7 +96,7 @@ export function ReportForm({ selection, profile, onSelect, onDone }: ReportFormP
         });
       }}
     >
-      <h2>Report what you just passed</h2>
+      <h2>Map an obstacle</h2>
       <p className="muted">
         {selection
           ? `at ${selection.lat.toFixed(5)}, ${selection.lng.toFixed(5)} (${
@@ -107,7 +107,7 @@ export function ReportForm({ selection, profile, onSelect, onDone }: ReportFormP
           : 'Tap the map or use your location'}
       </p>
 
-      <label htmlFor="kind">Feature</label>
+      <label htmlFor="kind">Obstacle</label>
       <select
         id="kind"
         value={kind}
@@ -133,7 +133,7 @@ export function ReportForm({ selection, profile, onSelect, onDone }: ReportFormP
         ))}
       </select>
 
-      <label htmlFor="height">Curb / step height (cm, optional)</label>
+      <label htmlFor="height">Height (cm, optional)</label>
       <input
         id="height"
         type="number"
@@ -161,7 +161,7 @@ export function ReportForm({ selection, profile, onSelect, onDone }: ReportFormP
           {locating ? 'Locating…' : 'Use my location'}
         </button>
         <button className="primary" type="submit" disabled={!selection || create.isPending}>
-          {create.isPending ? 'Sending…' : 'Send report'}
+          {create.isPending ? 'Adding…' : 'Add to map'}
         </button>
       </div>
       {locateError ? (
