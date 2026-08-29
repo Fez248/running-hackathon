@@ -155,9 +155,9 @@ the report inside it, so a vote in flight can neither push a reviewed report bac
 have its tally overwritten by a decision that read the older counts.
 
 A withheld report is withheld everywhere, not only on the map: `report.byId` returns `NOT_FOUND` for a
-`PENDING_REVIEW` or `REJECTED` report to a caller without an identity, since a report id is not a
-permission and the raw transcript is exactly what the queue exists to hold back. Reviewers reach those
-reports through `review.queue`.
+`PENDING_REVIEW` or `REJECTED` report to anyone but its author, since neither a report id nor an account
+is a permission, and the raw transcript is exactly what the queue exists to hold back. Reviewers reach
+those reports through `review.queue`, which is where the reviewing privilege belongs.
 
 Privacy and support notes, surfaced in the UI as well:
 

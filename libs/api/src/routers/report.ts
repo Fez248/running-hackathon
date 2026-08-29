@@ -47,8 +47,9 @@ export const reportRouter = createTRPCRouter({
    * One report in full. A report withheld from the map — a dictation waiting in
    * the review queue, or one a reviewer rejected — is not public either: its raw
    * transcript is exactly what the queue exists to keep off the map until a human
-   * has read it, and an id is guessable enough not to be a permission. Reviewers
-   * reach it through `review.queue`, which requires an identity.
+   * has read it, and an id is guessable enough not to be a permission. Having an
+   * account is not a permission either: only the author of a withheld report can
+   * read it back here, and reviewers reach the queue through `review.queue`.
    */
   byId: publicProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
     const report = await ctx.prisma.report.findUnique({
@@ -57,7 +58,9 @@ export const reportRouter = createTRPCRouter({
     });
     if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
 
-    if (withheldFromPublic(report.status) && !ctx.user) throw new TRPCError({ code: 'NOT_FOUND' });
+    if (withheldFromPublic(report.status) && report.authorId !== ctx.user?.id) {
+      throw new TRPCError({ code: 'NOT_FOUND' });
+    }
 
     return report;
   }),
