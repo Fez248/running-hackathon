@@ -29,6 +29,18 @@ const COLORS: Record<Passability, string> = {
   UNKNOWN: '#99a3b3',
 };
 
+/** How the observation was captured, shown in the popup and the marker outline. */
+const SOURCE_LABELS: Record<string, string> = {
+  VOICE: 'dictated',
+  SENSOR: 'sensed by phone',
+};
+
+/** Dictated and sensor reports are dashed so their provenance is legible at a glance. */
+const SOURCE_DASH: Record<string, string> = {
+  VOICE: '3',
+  SENSOR: '1 5',
+};
+
 export interface MapReport {
   id: string;
   lat: number;
@@ -159,12 +171,12 @@ export function MapView({
           <CircleMarker
             key={report.id}
             center={[report.lat, report.lng]}
-            radius={report.source === 'VOICE' ? 9 : 7}
+            radius={report.source && report.source !== 'MANUAL' ? 9 : 7}
             pathOptions={{
               color: COLORS[report.effectivePassability],
               fillColor: COLORS[report.effectivePassability],
               fillOpacity: 0.6,
-              dashArray: report.source === 'VOICE' ? '3' : undefined,
+              dashArray: report.source ? SOURCE_DASH[report.source] : undefined,
             }}
             eventHandlers={{
               // Opening a popup must not also move the report pin.
@@ -176,7 +188,9 @@ export function MapView({
               <br />
               {report.effectivePassability.toLowerCase()} · {(report.confidence * 100).toFixed(0)}%
               confidence
-              {report.source === 'VOICE' ? ' · dictated' : ''}
+              {report.source && SOURCE_LABELS[report.source]
+                ? ` · ${SOURCE_LABELS[report.source]}`
+                : ''}
               {report.note ? (
                 <>
                   <br />

@@ -9,3 +9,4 @@ export * from './location-consent';
 export * from './voice';
 export * from './voice-capture';
 export * from './review';
+export * from './scan';

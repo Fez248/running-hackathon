@@ -12,6 +12,7 @@ the Sidewalk Map data model (`ROUGH_SURFACE` reports) without another step.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -171,6 +172,65 @@ def to_geojson(result: ScanResult) -> dict:
     }
 
 
+def default_client_scan_id(result: ScanResult) -> str:
+    """Content-addressed id for a scan.
+
+    The ingest endpoint deduplicates on this id, so it is derived from what the
+    scan actually says: uploading the same bridge output twice must not create a
+    second scan, while re-running the detector with a different threshold must.
+    """
+    material = json.dumps(result.as_dict(), sort_keys=True, default=str)
+    return "scan-" + hashlib.sha256(material.encode()).hexdigest()[:24]
+
+
+def to_map_payload(result: ScanResult, client_scan_id: str | None = None) -> dict:
+    """The payload accepted by the Sidewalk Map ``scan.ingest`` endpoint.
+
+    Same content as :meth:`ScanResult.as_dict`, in the map's naming conventions:
+    camelCase keys and ``lng`` instead of ``lon``. Findings the GPS could not
+    place are omitted — a surface report without a position cannot go on a map —
+    but the quality certificate is sent whatever the verdict, so the server can
+    record (and refuse) an unusable capture rather than never hearing about it.
+    """
+    q = result.quality
+    return {
+        "source": result.source,
+        "format": result.format,
+        "quality": {
+            "fsHz": q.fs_hz,
+            "jitterMs": q.jitter_ms,
+            "dropoutFrac": q.dropout_frac,
+            "durationS": q.duration_s,
+            "gravityPresent": q.gravity_present,
+            "clippingFrac": q.clipping_frac,
+            "gpsPresent": q.gps_present,
+            "gpsAccuracyM": q.gps_accuracy_m,
+            "routeLengthM": q.route_length_m,
+            "verdict": q.verdict,
+            "problems": list(q.problems),
+            "warnings": list(q.warnings),
+        },
+        "cadenceSpm": result.cadence_spm,
+        "findings": [
+            {
+                "index": f.index,
+                "kind": f.kind,
+                "description": f.description,
+                "startM": f.start_m,
+                "endM": f.end_m,
+                "peakM": f.peak_m,
+                "score": f.score,
+                "confidence": f.confidence,
+                "lat": f.lat,
+                "lng": f.lon,
+            }
+            for f in result.findings
+            if f.lat is not None and f.lon is not None
+        ],
+        "clientScanId": client_scan_id or default_client_scan_id(result),
+    }
+
+
 def to_csv(result: ScanResult) -> str:
     header = "index,kind,start_m,end_m,peak_m,score,confidence,lat,lon"
     rows = [
@@ -181,12 +241,14 @@ def to_csv(result: ScanResult) -> str:
     return "\n".join([header, *rows]) + "\n"
 
 
-def write_output(result: ScanResult, path: Path, fmt: str) -> Path:
+def write_output(result: ScanResult, path: Path, fmt: str, client_scan_id: str | None = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "json":
         path.write_text(json.dumps(result.as_dict(), indent=2, default=str))
     elif fmt == "geojson":
         path.write_text(json.dumps(to_geojson(result), indent=2))
+    elif fmt == "map":
+        path.write_text(json.dumps(to_map_payload(result, client_scan_id), indent=2, default=str))
     elif fmt == "csv":
         path.write_text(to_csv(result))
     else:
