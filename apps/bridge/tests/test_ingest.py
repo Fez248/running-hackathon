@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import csv
+from pathlib import Path
+
 import numpy as np
 import pytest
 from imukit.geo import cumulative_distance, position_at_distance
+from imukit.preprocess import G, lowpass
 
 from bridge.experiments import ROUTE_ANOMALIES
-from bridge.ingest import load_recording, write_export_dir
+from bridge.ingest import (
+    DEMO_EPOCH_NS,
+    GRAVITY_CUTOFF_HZ,
+    load_recording,
+    write_export_dir,
+)
 from bridge.quality import FLOOR_FS_HZ, assess
 from bridge.scan import CONFIDENCE_BY_VERDICT, format_report, scan_recording, to_csv, to_geojson
 from bridge.synth import SurfaceScenario, simulate_pass
@@ -93,6 +102,89 @@ def test_generic_csv_with_separate_gps(tmp_path):
     assert rec.format == "csv"
     assert rec.gps is not None
     assert rec.gps.accuracy_m[0] == pytest.approx(4.0)
+
+
+def _write_stream(path: Path, t: np.ndarray, accel: np.ndarray) -> Path:
+    """Write one Sensor Logger shaped acceleration stream (any stream name)."""
+    with path.open("w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["time", "seconds_elapsed", "z", "y", "x"])
+        for ti, (ax, ay, az) in zip(t, accel, strict=True):
+            w.writerow(
+                [DEMO_EPOCH_NS + int(ti * 1e9), f"{ti:.6f}", f"{az:.9f}", f"{ay:.9f}", f"{ax:.9f}"]
+            )
+    return path
+
+
+def _export_with_streams(directory: Path, trace, gps, **streams: tuple) -> Path:
+    """A Sensor Logger export carrying ``streams`` instead of TotalAcceleration.csv.
+
+    Each stream is a ``(t, accel)`` pair, so a stream can be logged on its own
+    sample grid the way the phone does.
+    """
+    write_export_dir(directory, trace, gps)
+    (directory / "TotalAcceleration.csv").unlink()
+    for name, (t, accel) in streams.items():
+        _write_stream(directory / f"{name}.csv", t, accel)
+    return directory
+
+
+def test_g_unit_uncalibrated_export_is_normalised_at_ingest(tmp_path):
+    """A raw Sensor Logger export in *g* must scan exactly like the m/s² one.
+
+    ``AccelerometerUncalibrated.csv`` reads ~1.00 at rest, which used to be read
+    as a gravity-free stream and refused; nothing about the capture justified
+    that, only its unit.
+    """
+    trace, gps, _ = _short_pass()
+    write_export_dir(tmp_path / "ms2", trace, gps)
+    g_dir = _export_with_streams(
+        tmp_path / "g", trace, gps, AccelerometerUncalibrated=(trace.t, trace.accel / G)
+    )
+
+    rec = load_recording(g_dir)
+    assert np.allclose(rec.trace.accel, trace.accel, atol=1e-6)
+    assert any("in g" in n and "9.80665" in n for n in rec.notes)
+
+    result, _pp = scan_recording(rec)
+    baseline, _bpp = scan_recording(load_recording(tmp_path / "ms2"))
+    assert result.quality.gravity_present
+    assert result.quality.verdict == baseline.quality.verdict == "ok"
+    assert result.findings, "a g-unit export carries the same findings as an m/s² one"
+    assert [f.score for f in result.findings] == [f.score for f in baseline.findings]
+
+
+def test_accelerometer_and_gravity_streams_are_summed(tmp_path):
+    """Given both parts, the total acceleration is reconstructed, not guessed at."""
+    trace, gps, _ = _short_pass()
+    gravity = lowpass(trace.accel, trace.fs, GRAVITY_CUTOFF_HZ)
+    # Sensor Logger logs gravity slower than the accelerometer, so the sum has to
+    # resample it rather than assume a shared sample grid.
+    _export_with_streams(
+        tmp_path / "rec",
+        trace,
+        gps,
+        Accelerometer=(trace.t, trace.accel - gravity),
+        Gravity=(trace.t[::5], gravity[::5]),
+    )
+
+    rec = load_recording(tmp_path / "rec")
+    assert any("reconstructed from" in n for n in rec.notes)
+    assert any("already in m/s²" in n for n in rec.notes)
+    assert np.allclose(rec.trace.accel, trace.accel, atol=0.05)
+    assert assess(rec).gravity_present
+
+
+def test_g_unit_gravity_free_stream_is_still_rejected(tmp_path):
+    """Normalising units must not rescue a stream that has no gravity in it."""
+    trace, gps, _ = _short_pass(length_m=200.0)
+    linear = (trace.accel - lowpass(trace.accel, trace.fs, GRAVITY_CUTOFF_HZ)) / G
+    _export_with_streams(tmp_path / "rec", trace, gps, AccelerometerUncalibrated=(trace.t, linear))
+
+    q = assess(load_recording(tmp_path / "rec"))
+    assert not q.gravity_present
+    assert q.verdict == "unusable"
+    assert any("gravity" in p for p in q.problems)
 
 
 def test_gravity_free_stream_is_rejected_by_the_quality_gate(tmp_path):

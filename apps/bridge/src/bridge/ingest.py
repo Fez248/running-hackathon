@@ -8,13 +8,19 @@ recorded pass and a simulated pass go through exactly the same code path.
 Supported inputs (auto-detected):
 
 * **Sensor Logger** (iOS/Android) export directory or ``.zip`` —
-  ``TotalAcceleration.csv`` (preferred) or ``Accelerometer.csv`` plus
-  ``Location.csv``;
+  ``Accelerometer.csv`` + ``Gravity.csv``, ``TotalAcceleration.csv`` or
+  ``AccelerometerUncalibrated.csv``, plus ``Location.csv``;
 * **phyphox** export directory or ``.zip`` — ``Accelerometer.csv`` /
   ``Location.csv`` with ``"Time (s)"``-style headers, comma or semicolon
   separated;
 * **generic CSV** — a time column plus three acceleration columns, with an
   optional separate GPS CSV (``t,lat,lon[,accuracy_m]``).
+
+Everything downstream projects acceleration onto gravity, so the total
+acceleration is normalised here rather than assumed: it is reconstructed when
+the export only ships its parts, and converted to m/s² when the stream was
+logged in *g* (see :func:`to_ms2`). Only a stream that carries no gravity at all
+reaches the quality gate as such.
 
 Only stdlib + numpy are used; the exports are small enough that a streaming
 reader is not worth the dependency.
@@ -29,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from imukit.preprocess import G, lowpass
 from imukit.types import GpsTrack, ImuTrace
 
 # Header aliases, lower-cased and stripped of units/punctuation.
@@ -54,6 +61,16 @@ DEMO_EPOCH_NS = 1_700_000_000_000_000_000
 # can interpret, so refuse it rather than read it into memory.
 MAX_TABLE_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
+
+# Gravity sits below GRAVITY_CUTOFF_HZ, gait and orientation changes above it, so
+# the low-passed norm of a gravity-carrying stream is the gravity magnitude in
+# whatever unit the stream was logged: ~1 for *g*, ~9.81 for m/s². The band is
+# wide because a phone carried by a runner is neither still nor level.
+GRAVITY_CUTOFF_HZ = 0.4
+GRAVITY_BAND_G = (0.5, 2.0)
+# Relative interquartile spread of the DC magnitude above which a ~1-magnitude
+# stream is low-frequency residue rather than gravity logged in *g*.
+MAX_GRAVITY_DC_SPREAD = 0.25
 
 
 @dataclass
@@ -148,6 +165,62 @@ def _trace_from_table(cols: dict[str, np.ndarray], t0: float | None = None) -> t
     return ImuTrace(t=t, accel=np.column_stack([ax, ay, az]), fs=fs), origin
 
 
+def dc_magnitude(accel: np.ndarray, fs: float) -> float:
+    """Median magnitude of the sub-``GRAVITY_CUTOFF_HZ`` component of ``accel``.
+
+    Gait and orientation changes live above that cutoff, so the low-passed norm
+    is ~g for a gravity-carrying stream and ~0 for a linear/user-acceleration
+    one however vigorous the motion — the mean raw norm is not, because hard
+    running averages well above 0.5 g with gravity already removed.
+    """
+    if fs <= 4 * GRAVITY_CUTOFF_HZ or accel.shape[0] < 64:
+        return float(np.linalg.norm(np.mean(accel, axis=0)))
+    return float(np.median(np.linalg.norm(lowpass(accel, fs, GRAVITY_CUTOFF_HZ), axis=1)))
+
+
+def dc_steadiness(accel: np.ndarray, fs: float) -> float:
+    """Interquartile spread of the DC magnitude, relative to its median.
+
+    Gravity has a constant magnitude however the phone tumbles, so its DC norm
+    is flat (~0.06 on a recorded run); the low-frequency residue left in a
+    gravity-free stream wanders instead (~0.8). That is what separates a
+    ~1-magnitude stream logged in *g* from a vigorous stream in m/s² whose
+    residual DC happens to sit near 1.
+    """
+    if fs <= 4 * GRAVITY_CUTOFF_HZ or accel.shape[0] < 64:
+        return 0.0
+    norm = np.linalg.norm(lowpass(accel, fs, GRAVITY_CUTOFF_HZ), axis=1)
+    median = float(np.median(norm))
+    if median <= 0:
+        return float("inf")
+    return float(np.subtract(*np.percentile(norm, [75, 25]))) / median
+
+
+def to_ms2(trace: ImuTrace) -> tuple[ImuTrace, float, str]:
+    """Normalise a gravity-carrying stream to m/s²; return it with its scale and a note.
+
+    Sensor Logger's calibrated streams are m/s², but its uncalibrated one (and
+    several Android builds) export *g*, where a total acceleration reads ~1.00
+    instead of ~9.81 — indistinguishable from a gravity-free stream to anything
+    that only looks at the magnitude. The DC magnitude names the unit: it is the
+    gravity constant as the exporter wrote it, provided it is steady enough to be
+    gravity at all (see :func:`dc_steadiness`).
+
+    A stream whose DC magnitude matches neither unit carries no gravity to scale
+    by, so it is returned untouched for the quality gate to refuse.
+    """
+    dc = dc_magnitude(trace.accel, trace.fs)
+    lo, hi = GRAVITY_BAND_G
+    if lo < dc < hi and dc_steadiness(trace.accel, trace.fs) <= MAX_GRAVITY_DC_SPREAD:
+        scaled = ImuTrace(t=trace.t, accel=trace.accel * G, fs=trace.fs)
+        return scaled, G, f"acceleration was in g (DC |a| {dc:.3f} g), scaled by {G:.5f} to m/s²"
+    if lo * G < dc < hi * G:
+        return trace, 1.0, f"acceleration already in m/s² (DC |a| {dc:.2f} m/s²), scale 1.0"
+    return trace, 1.0, (
+        f"DC |a| is {dc:.3f}: neither ~1 g nor ~{G:.1f} m/s², so there is no gravity to scale by"
+    )
+
+
 def _gps_from_table(cols: dict[str, np.ndarray], t0: float) -> GpsTrack | None:
     t_raw, lat, lon = _pick(cols, TIME_KEYS), _pick(cols, LAT_KEYS), _pick(cols, LON_KEYS)
     if t_raw is None or lat is None or lon is None:
@@ -175,16 +248,46 @@ def _find(directory: Path, *stems: str) -> Path | None:
     return None
 
 
+def _add_gravity_stream(trace: ImuTrace, gravity_path: Path, t0: float) -> ImuTrace:
+    """Add a separately logged gravity stream onto a gravity-free one.
+
+    The two streams share the export's clock but not its sample instants, so
+    gravity is resampled onto the accelerometer's timestamps. It is a sub-1 Hz
+    signal, so linear interpolation costs nothing.
+    """
+    gravity, _ = _trace_from_table(read_table(gravity_path), t0=t0)
+    resampled = np.column_stack(
+        [np.interp(trace.t, gravity.t, gravity.accel[:, i]) for i in range(3)]
+    )
+    return ImuTrace(t=trace.t, accel=trace.accel + resampled, fs=trace.fs)
+
+
 def load_export_dir(directory: Path) -> Recording:
-    """Load a Sensor Logger / phyphox style export directory."""
-    total = _find(directory, "totalacceleration", "accelerometeruncalibrated")
+    """Load a Sensor Logger / phyphox style export directory.
+
+    The stream picked is whichever total acceleration the export can supply,
+    most-certain first: ``Accelerometer.csv`` + ``Gravity.csv`` reconstructs it
+    exactly, ``TotalAcceleration.csv`` and ``AccelerometerUncalibrated.csv``
+    already are it, and a bare accelerometer stream may be either — it is taken
+    as-is and left to the quality gate. Whatever the route, the result is
+    normalised to m/s² and the scale applied is recorded in the notes.
+    """
+    notes: list[str] = []
     plain = _find(directory, "accelerometer", "linearacceleration", "accelerationwithoutg")
-    accel_path = total or plain
+    gravity_path = _find(directory, "gravity")
+    total = _find(directory, "totalacceleration", "accelerometeruncalibrated")
+    accel_path = plain if (plain is not None and gravity_path is not None) else (total or plain)
     if accel_path is None:
         raise FileNotFoundError(f"{directory}: no Accelerometer.csv / TotalAcceleration.csv found")
     cols = read_table(accel_path)
-    notes: list[str] = []
     trace, t0 = _trace_from_table(cols)
+    if accel_path is plain and gravity_path is not None:
+        trace = _add_gravity_stream(trace, gravity_path, t0)
+        notes.append(
+            f"total acceleration reconstructed from {accel_path.name} + {gravity_path.name}"
+        )
+    trace, _scale, scale_note = to_ms2(trace)
+    notes.append(scale_note)
     gps_path = _find(directory, "location", "gps", "locationgps")
     gps = _gps_from_table(read_table(gps_path), t0) if gps_path else None
     if gps is None:
@@ -198,7 +301,8 @@ def load_export_dir(directory: Path) -> Recording:
 def load_generic_csv(accel_csv: Path, gps_csv: Path | None = None) -> Recording:
     """Load a single accelerometer CSV plus an optional GPS CSV."""
     trace, t0 = _trace_from_table(read_table(accel_csv))
-    notes: list[str] = []
+    trace, _scale, scale_note = to_ms2(trace)
+    notes: list[str] = [scale_note]
     gps = _gps_from_table(read_table(gps_csv), t0) if gps_csv else None
     if gps is None:
         notes.append("no GPS track: findings cannot be located along the route.")
