@@ -136,10 +136,16 @@ export function MapWorkspace() {
   });
 
   const toggleVoice = useCallback(
-    (enabled: boolean) => {
-      setVoiceEnabled(enabled);
-      if (enabled) voice.startRecognition();
-      else voice.stopRecognition();
+    async (enabled: boolean) => {
+      if (!enabled) {
+        setVoiceEnabled(false);
+        voice.stopRecognition();
+        return;
+      }
+      setVoiceEnabled(true);
+      // A refused microphone must not leave the toggle looking armed.
+      const started = await voice.startRecognition();
+      if (!started) setVoiceEnabled(false);
     },
     [voice],
   );
@@ -151,6 +157,12 @@ export function MapWorkspace() {
       voice.stopRecognition();
     }
   }, [running, voiceEnabled, voice]);
+
+  // The session can also give up on its own (permission revoked mid-run, the
+  // recogniser dropping out repeatedly).
+  useEffect(() => {
+    if (voiceEnabled && !voice.listening && !voice.starting) setVoiceEnabled(false);
+  }, [voiceEnabled, voice.listening, voice.starting]);
 
   const toggleKind = (kind: ObstacleKind) =>
     setKinds((current) =>
@@ -206,12 +218,17 @@ export function MapWorkspace() {
           voice={{
             enabled: voiceEnabled,
             supported: voice.supported,
+            micState: voice.micState,
             listening: voice.listening,
+            starting: voice.starting,
+            level: voice.level,
             interim: voice.interim,
             error: voice.error,
             utterances: voice.utterances,
           }}
           onToggleVoice={toggleVoice}
+          onCancelPhrase={voice.cancelPhrase}
+          onRetryMic={voice.retryMic}
           onTypedReport={voice.submitTyped}
           voiceStatus={voiceStatus}
           fogError={coverage.error?.message ?? null}
