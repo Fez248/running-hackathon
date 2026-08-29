@@ -18,9 +18,10 @@ apps/bridge/
   src/bridge/evaluate.py     precision/recall/localization/AUC against ground truth
   src/bridge/experiments.py  E1-E5 feasibility experiments (seeded)
   src/bridge/cli.py          `scan`, `run`, `demo`, `plot`
-  tests/                     31 tests (pytest)
+  tests/                     35 tests (pytest)
   docs/FEASIBILITY.md            feasibility study, findings, limitations, plan
   docs/FLOOR_IMPERFECTION_MVP.md MVP viability report (recording -> findings)
+  docs/REAL_WORLD_TEST.md        how to record a real pass and scan it (protocol + acceptance checks)
   docs/SENSOR_RECORDING_STACK.md recording-stack investigation (RN vs native vs PWA, Garmin)
 libs/imukit/                 shared, app-agnostic IMU/GPS primitives
 ```
@@ -44,7 +45,10 @@ python -m ruff check . ../../libs/imukit
 current technology": point it at a recording from an ordinary phone logging app and
 it prints a capture-quality verdict followed by geo-located findings. See
 [docs/FLOOR_IMPERFECTION_MVP.md](docs/FLOOR_IMPERFECTION_MVP.md) for measured demo
-numbers, assumptions, limitations and the next experiments.
+numbers, assumptions, limitations and the next experiments, and
+[docs/REAL_WORLD_TEST.md](docs/REAL_WORLD_TEST.md) for the step-by-step protocol for
+recording a real pass on a phone, the acceptance checks it must clear, and how to
+read the result.
 
 ```bash
 cd apps/bridge
