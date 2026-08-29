@@ -140,6 +140,15 @@ export function useRunTracker({
     [revealRadiusM],
   );
 
+  /** Drops the last run's failure once it no longer describes the current state. */
+  const clearError = useCallback(() => {
+    setStatus((s) =>
+      s.error == null && s.permission !== 'denied'
+        ? s
+        : { ...s, error: null, permission: s.permission === 'denied' ? 'unknown' : s.permission },
+    );
+  }, []);
+
   const stop = useCallback(async () => {
     const run = runRef.current;
     runRef.current = null;
@@ -343,5 +352,6 @@ export function useRunTracker({
     revealError: reveal.error?.message ?? null,
     start,
     stop,
+    clearError,
   };
 }

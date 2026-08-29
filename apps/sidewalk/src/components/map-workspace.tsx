@@ -200,6 +200,14 @@ export function MapWorkspace() {
     if (trackerPermission === 'denied') noteDeniedRef.current();
   }, [trackerPermission]);
 
+  // Once access is back, the stopped run's denial no longer describes anything, so
+  // the panel must not keep showing it next to a granted consent card.
+  const clearRunErrorRef = useRef(runTracker.clearError);
+  clearRunErrorRef.current = runTracker.clearError;
+  useEffect(() => {
+    if (locationPermission.state === 'granted') clearRunErrorRef.current();
+  }, [locationPermission.state]);
+
   // Dictation is tied to the run: stopping the run also stops the microphone.
   useEffect(() => {
     if (!running && voiceEnabled) {
