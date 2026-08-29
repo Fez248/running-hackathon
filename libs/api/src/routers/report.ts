@@ -28,6 +28,17 @@ function rejectReservedClientReportId(clientReportId: string | undefined): void 
   }
 }
 
+/**
+ * `SENSOR` marks an observation as measured by the bridge pipeline, which only
+ * the Sensor Logger integration can do (`createSensorReports`). A client saying
+ * so would be forging provenance the map presents as automatic.
+ */
+function rejectServerOwnedSource(source: string): void {
+  if (source === 'SENSOR') {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'source SENSOR is server-owned' });
+  }
+}
+
 export const reportRouter = createTRPCRouter({
   /** Everything visible in the current map viewport. */
   byBounds: publicProcedure.input(boundsSchema).query(async ({ ctx, input }) => {
@@ -73,6 +84,7 @@ export const reportRouter = createTRPCRouter({
   create: publicProcedure.input(createReportSchema).mutation(async ({ ctx, input }) => {
     const gate = voiceGate(input.source, input.transcript);
     rejectReservedClientReportId(input.clientReportId);
+    rejectServerOwnedSource(input.source);
     const data = {
       lat: input.lat,
       lng: input.lng,
@@ -182,6 +194,7 @@ export const reportRouter = createTRPCRouter({
       for (const report of input.reports) {
         const gate = voiceGate(report.source, report.transcript);
         rejectReservedClientReportId(report.clientReportId);
+        rejectServerOwnedSource(report.source);
         const data = {
           lat: report.lat,
           lng: report.lng,

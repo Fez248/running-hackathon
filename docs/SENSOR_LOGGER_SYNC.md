@@ -162,6 +162,8 @@ voice reports:
   after a timeout updates its pins instead of duplicating them. `sl:` is a reserved namespace: the
   `report.create`/`createMany`/`createFromVoice` procedures reject a client-supplied
   `clientReportId` with that prefix, so an app client cannot occupy a row a later scan will write.
+  `source: 'SENSOR'` is server-owned in the same way: `report.create`/`createMany` reject it, so
+  only the integration's own writer can mark a pin as measured.
 
 ## Secret handling
 
@@ -199,7 +201,9 @@ is rejected before it touches the database.
 **SSRF.** The webhook payload never supplies a URL. The Study API origin is a constant, the two ids
 are URL-encoded into the query string, and the worker re-checks scheme+host before every call
 (`_require_study_origin`), so a hostile `uploadId` can neither escape the path nor redirect the
-request. Redirects are not followed to other hosts, since only `sensorlogger.app` is ever addressed.
+request. Redirects are refused outright rather than followed (`study_opener`): a 3xx would otherwise
+replay the `Authorization` header against whatever host it names, so a redirect surfaces as a failed
+download instead.
 The downloaded zip is treated as untrusted input by the existing ingest code: entries that escape the
 extraction directory are rejected, and per-file sizes are capped.
 

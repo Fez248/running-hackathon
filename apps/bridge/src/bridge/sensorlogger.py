@@ -95,6 +95,25 @@ def _require_study_origin(url: str) -> None:
         raise SyncError(f"refusing to call {parsed.scheme}://{parsed.netloc}: not the Study API")
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: the Study calls carry a Study-wide credential.
+
+    Returning ``None`` makes urllib surface the 3xx as an ``HTTPError`` instead of
+    replaying the ``Authorization`` header against whatever host it points at.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201
+        return None
+
+
+_STUDY_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
+def study_opener(request: urllib.request.Request, timeout: float | None = None) -> Any:
+    """Default opener for Study API calls: same shape as ``urlopen``, no redirects."""
+    return _STUDY_OPENER.open(request, timeout=timeout)
+
+
 def _content_length(headers: Any) -> int | None:
     raw = headers.get("Content-Length")
     try:
@@ -109,7 +128,7 @@ def download_recording(
     secret_code: str,
     dest: Path,
     *,
-    opener: Opener = urllib.request.urlopen,
+    opener: Opener = study_opener,
     max_bytes: int = MAX_DOWNLOAD_BYTES,
     timeout: float = HTTP_TIMEOUT_S,
 ) -> int:
@@ -232,7 +251,7 @@ def post_feedback(
     secret_code: str,
     markdown: str,
     *,
-    opener: Opener = urllib.request.urlopen,
+    opener: Opener = study_opener,
     timeout: float = HTTP_TIMEOUT_S,
 ) -> None:
     """POST a Markdown report back to the participant (Notify & Respond mode)."""
@@ -334,7 +353,7 @@ class SyncConfig:
 class SidewalkClient:
     """Minimal client for the Sidewalk sync endpoints (worker bearer token)."""
 
-    def __init__(self, config: SyncConfig, *, opener: Opener = urllib.request.urlopen) -> None:
+    def __init__(self, config: SyncConfig, *, opener: Opener = study_opener) -> None:
         self._config = config
         self._opener = opener
 
@@ -357,7 +376,12 @@ class SidewalkClient:
         except urllib.error.URLError as exc:
             reason = redact(str(exc.reason), self._config.worker_token, self._config.secret_code)
             raise SyncError(f"{path} failed: {reason}") from None
-        parsed = json.loads(raw)
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            # A malformed response must not escape as an exception: it would end
+            # the polling loop and abandon the rest of the leased batch.
+            raise SyncError(f"{path} returned invalid JSON") from None
         if not isinstance(parsed, dict):
             raise SyncError(f"{path} returned {type(parsed).__name__}, expected an object")
         return parsed
@@ -399,7 +423,7 @@ def process_upload(
     config: SyncConfig,
     client: SidewalkClient,
     *,
-    opener: Opener = urllib.request.urlopen,
+    opener: Opener = study_opener,
     threshold: float = 3.0,
 ) -> dict[str, Any]:
     """Download, scan and report one upload. Failures are reported, not raised."""
@@ -476,7 +500,7 @@ def sync_once(
     config: SyncConfig,
     *,
     client: SidewalkClient | None = None,
-    opener: Opener = urllib.request.urlopen,
+    opener: Opener = study_opener,
     threshold: float = 3.0,
 ) -> list[dict[str, Any]]:
     """Lease every currently pending upload batch and process it."""

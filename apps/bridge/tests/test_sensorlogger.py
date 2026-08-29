@@ -17,6 +17,7 @@ from bridge.sensorlogger import (
     SidewalkClient,
     SyncConfig,
     SyncError,
+    _NoRedirectHandler,
     download_recording,
     feedback_markdown,
     process_upload,
@@ -344,6 +345,24 @@ def test_config_allows_plaintext_only_for_a_local_server():
         SyncConfig.from_env(_env(SIDEWALK_API_URL="http://localhost:3000")).api_base_url
         == "http://localhost:3000"
     )
+
+
+def test_study_calls_never_follow_a_redirect():
+    # The Study calls carry a Study-wide credential, so a 3xx must not be replayed
+    # against another host; urllib turns a `None` here into an HTTPError.
+    handler = _NoRedirectHandler()
+    assert (
+        handler.redirect_request(None, None, 302, "Found", {}, "https://evil.example/steal") is None
+    )
+
+
+def test_a_malformed_response_is_a_sync_error_not_a_crash():
+    class Garbage(FakeHttp):
+        def __call__(self, request, timeout=None):  # noqa: ANN001
+            return FakeResponse(b"<html>gateway</html>")
+
+    with pytest.raises(SyncError, match="invalid JSON"):
+        SidewalkClient(_config(), opener=Garbage()).claim()
 
 
 def test_a_completion_outage_does_not_abandon_the_rest_of_the_batch(tmp_path):
