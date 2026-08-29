@@ -547,10 +547,19 @@ def sync_forever(
     sleep: Callable[[float], None] = time.sleep,
     **kwargs: Any,
 ) -> Iterator[list[dict[str, Any]]]:
-    """Poll the queue, yielding the outcome of each cycle."""
+    """Poll the queue, yielding the outcome of each cycle.
+
+    A cycle that fails outright (the server is down, so no upload can even be
+    leased) is yielded as a ``cycle-failed`` outcome rather than raised: a
+    long-running worker must survive a brief outage and pick the queue up again
+    on the next tick.
+    """
     cycle = 0
     while max_cycles is None or cycle < max_cycles:
-        yield sync_once(config, **kwargs)
+        try:
+            yield sync_once(config, **kwargs)
+        except SyncError as exc:
+            yield [{"status": "cycle-failed", "error": str(exc)}]
         cycle += 1
         if max_cycles is None or cycle < max_cycles:
             sleep(interval_s)

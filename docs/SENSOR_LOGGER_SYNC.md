@@ -143,7 +143,10 @@ queued, for one nobody claimed, or from a worker whose lease already timed out a
 someone else is refused with `409` without touching the map or the other worker's row.
 
 When the worker cannot reach this endpoint it emits `{"status":"unreported","reportError":...}` for that upload and carries on
-with the rest of the batch; the lease then expires and the upload is handed out again.
+with the rest of the batch; the lease then expires and the upload is handed out again. An outage that
+prevents leasing at all is reported as `{"status":"cycle-failed","error":...}` for that cycle and
+`bridge sync --poll` keeps polling, so a brief server outage does not stop a long-running worker
+(a one-shot `bridge sync` still exits non-zero). Configuration errors stay fatal.
 
 ## Data mapping
 
@@ -162,6 +165,10 @@ voice reports:
   automated observations from human ones.
 - `note`: the finding description, distance along the route, robust-z score, and a
   "degraded capture" marker when the quality gate warned.
+- `confidence`/`detectorConfidence`: the fresh-report crowd/GPS confidence scaled by the detector's
+  own confidence, with that factor stored alongside it and re-applied whenever a vote recomputes
+  confidence — the same contract as an uploaded scan, so a weak detection cannot be voted up to the
+  confidence of a human observation.
 - `clientReportId`: `sl:<studyId>:<uploadId>:<index>`, or `sl:<fnv1a64 hex>:<index>` when that would
   exceed the 64-character column. `report.create` upserts on this key, so a worker that retries
   after a timeout updates its pins instead of duplicating them. `sl:` is a reserved namespace: the

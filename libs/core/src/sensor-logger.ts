@@ -209,6 +209,16 @@ function noteFor(finding: BridgeFinding, scan: BridgeScanResult): string {
 }
 
 /**
+ * A mapped finding, with the detector's own confidence kept as a factor of its
+ * own so a later vote recomputing the crowd/GPS part cannot promote a weak
+ * detection to the confidence of a human observation (same contract as
+ * `SensorReportDraft` for uploaded scans).
+ */
+export interface SensorLoggerReportDraft extends CreateReportInput {
+  detectorConfidence: number;
+}
+
+/**
  * Map a bridge scan onto `report.createMany` input. Every report carries a
  * deterministic `clientReportId`, so re-running a scan for the same upload
  * updates nothing and creates nothing new.
@@ -216,7 +226,7 @@ function noteFor(finding: BridgeFinding, scan: BridgeScanResult): string {
 export function scanToReports(
   payload: { studyId: string; uploadId: string },
   scan: BridgeScanResult,
-): CreateReportInput[] {
+): SensorLoggerReportDraft[] {
   if (!scan.quality.usable) return [];
   return scan.findings.filter(isMappableFinding).map((finding) => ({
     lat: finding.lat as number,
@@ -226,6 +236,7 @@ export function scanToReports(
     note: noteFor(finding, scan),
     source: 'SENSOR' as const,
     clientReportId: findingReportId(payload, finding.index),
+    detectorConfidence: finding.confidence,
   }));
 }
 

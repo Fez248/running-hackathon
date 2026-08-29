@@ -240,6 +240,29 @@ describe('POST webhook', () => {
     });
     expect((await handleSensorLoggerWebhook(request, deps())).status).toBe(413);
   });
+
+  it('stops reading a body that understates its length', async () => {
+    const chunk = new TextEncoder().encode('x'.repeat(4096));
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 1;
+        controller.enqueue(chunk);
+      },
+    });
+
+    const request = new Request('https://example.test/webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': '12' },
+      body,
+      // @ts-expect-error a streaming body needs duplex, which the DOM types omit
+      duplex: 'half',
+    });
+
+    expect((await handleSensorLoggerWebhook(request, deps())).status).toBe(413);
+    // The 8 KiB limit is hit after a few chunks; the stream is never drained.
+    expect(sent).toBeLessThan(10);
+  });
 });
 
 describe('POST jobs/claim', () => {

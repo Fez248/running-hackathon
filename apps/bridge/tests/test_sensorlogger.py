@@ -25,6 +25,7 @@ from bridge.sensorlogger import (
     scan_payload,
     study_file_url,
     study_webhook_url,
+    sync_forever,
     sync_once,
 )
 from bridge.synth import SurfaceScenario, simulate_pass
@@ -429,3 +430,27 @@ def test_feedback_failure_does_not_undo_a_recorded_scan(tmp_path):
 
     assert outcome["status"] == "done"
     assert "HTTP 500" in str(outcome["feedbackError"])
+
+
+def test_polling_survives_an_outage_that_prevents_leasing(tmp_path):
+    class FlakyClaim(FakeHttp):
+        outage = True
+
+        def __call__(self, request, timeout=None):  # noqa: ANN001
+            if "/jobs/claim" in request.full_url and self.outage:
+                self.outage = False
+                raise urllib.error.HTTPError(request.full_url, 503, "down", {}, None)  # type: ignore[arg-type]
+            return super().__call__(request, timeout)
+
+    http = FlakyClaim(
+        recording=_recording_zip(tmp_path),
+        uploads=[{"studyId": "s1", "uploadId": "u1", "leaseToken": "lease-u1"}],
+    )
+    cycles = list(
+        sync_forever(_config(), 0.0, max_cycles=2, sleep=lambda _s: None, opener=http)
+    )
+
+    assert cycles[0][0]["status"] == "cycle-failed"
+    assert "HTTP 503" in cycles[0][0]["error"]
+    # The worker kept polling and picked the upload up on the next tick.
+    assert [o["status"] for o in cycles[1]] == ["done"]

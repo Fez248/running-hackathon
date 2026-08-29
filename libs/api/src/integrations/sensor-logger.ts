@@ -29,8 +29,8 @@ import {
   sensorLoggerWebhookSchema,
   secretCodeMatches,
   uploadKey,
-  type CreateReportInput,
   type SensorLoggerJobStatus,
+  type SensorLoggerReportDraft,
 } from '@sidewalk/core';
 
 /** Webhook bodies are three short strings; anything larger is not one. */
@@ -120,7 +120,7 @@ export interface SensorLoggerUploadStore {
 export interface SensorLoggerDeps {
   store: SensorLoggerUploadStore;
   /** Persist mapped reports; returns how many rows the map now has for them. */
-  createReports(reports: CreateReportInput[]): Promise<number>;
+  createReports(reports: SensorLoggerReportDraft[]): Promise<number>;
   config: SensorLoggerConfig;
   now?: () => Date;
 }
@@ -134,8 +134,9 @@ function json(body: unknown, status: number): Response {
 
 /**
  * Read a bounded body. `Content-Length` is checked first so an oversized upload
- * is refused before it is buffered; the decoded length is checked as well
- * because the header is advisory.
+ * is refused before a byte is read; the stream is then read in chunks and
+ * abandoned at the limit, because the header is advisory and absent entirely
+ * from a chunked request.
  */
 async function readBoundedText(
   request: Request,
@@ -145,11 +146,42 @@ async function readBoundedText(
   if (Number.isFinite(declared) && declared > maxBytes) {
     return { ok: false, response: json({ error: 'payload-too-large' }, 413) };
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).length > maxBytes) {
-    return { ok: false, response: json({ error: 'payload-too-large' }, 413) };
+
+  const body = request.body;
+  if (!body) {
+    const text = await request.text();
+    return new TextEncoder().encode(text).length > maxBytes
+      ? { ok: false, response: json({ error: 'payload-too-large' }, 413) }
+      : { ok: true, text };
   }
-  return { ok: true, text };
+
+  // Read incrementally and stop at the limit: `Content-Length` is advisory (and
+  // absent from a chunked request), so buffering the whole body first would let
+  // an unauthenticated caller decide how much memory the function uses.
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > maxBytes) {
+        return { ok: false, response: json({ error: 'payload-too-large' }, 413) };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const buffer = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { ok: true, text: new TextDecoder().decode(buffer) };
 }
 
 function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {

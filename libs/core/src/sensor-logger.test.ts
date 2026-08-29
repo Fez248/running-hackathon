@@ -159,6 +159,14 @@ describe('scanToReports', () => {
     expect(reports[0]?.note).toContain('43 m into the pass');
   });
 
+  it("carries the detector's own confidence so a weak detection stays discounted", () => {
+    const reports = scanToReports(payload, {
+      ...scan,
+      findings: [{ ...looseSlab, confidence: 0.35 }],
+    });
+    expect(reports[0]?.detectorConfidence).toBe(0.35);
+  });
+
   it('does not classify absorbing patches or low-confidence findings as difficult', () => {
     const reports = scanToReports(payload, {
       ...scan,

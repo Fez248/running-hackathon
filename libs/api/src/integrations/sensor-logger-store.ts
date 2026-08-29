@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { confidence, gridKey, type CreateReportInput } from '@sidewalk/core';
+import { confidence, gridKey, type SensorLoggerReportDraft } from '@sidewalk/core';
 import { prisma } from '@sidewalk/db';
 import {
   sensorLoggerConfigFromEnv,
@@ -122,9 +122,14 @@ export function prismaSensorLoggerStore(client: PrismaClientLike = prisma): Sens
 /**
  * Persist mapped findings. Every report carries a deterministic
  * `clientReportId`, so this is an upsert and a replayed scan is a no-op.
+ *
+ * The stored confidence is the crowd/GPS confidence of a fresh unvoted report
+ * scaled by the detector's own confidence, which is kept alongside it and
+ * re-applied whenever votes recompute confidence — the same contract as an
+ * uploaded scan (`sensorFindingToReport`).
  */
 export async function createSensorReports(
-  reports: CreateReportInput[],
+  reports: SensorLoggerReportDraft[],
   client: PrismaClientLike = prisma,
 ): Promise<number> {
   let written = 0;
@@ -139,7 +144,10 @@ export async function createSensorReports(
       accuracyM: report.accuracyM ?? null,
       source: report.source,
       clientReportId: report.clientReportId ?? null,
-      confidence: confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: report.accuracyM }),
+      confidence:
+        confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: report.accuracyM }) *
+        report.detectorConfidence,
+      detectorConfidence: report.detectorConfidence,
     };
     if (report.clientReportId) {
       await client.report.upsert({
