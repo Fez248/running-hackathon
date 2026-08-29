@@ -74,24 +74,29 @@ export function fogCellCenter(index: FogCellIndex): Coordinate {
 
 /**
  * Cells revealed by standing at `coord`: every cell whose centre is within
- * `radiusM`. Iterating the bounding box keeps this allocation-free enough to run
- * on every GPS tick.
+ * `radiusM`, nearest first, so the cell the runner stands in leads and a paced
+ * reveal grows outwards from the fix instead of in scanline order.
  */
 export function fogCellsAround(coord: Coordinate, radiusM = DEFAULT_REVEAL_RADIUS_M): string[] {
   const box = boundsAround(coord, radiusM);
   const from = fogCellIndex({ lat: box.minLat, lng: box.minLng });
   const to = fogCellIndex({ lat: box.maxLat, lng: box.maxLng });
 
-  const keys: string[] = [];
+  // The cell the runner stands in leads even when a neighbour's centre happens
+  // to be nearer, which is what a fix close to a cell border looks like.
+  const ownKey = fogCellKeyFromIndex(fogCellIndex(coord));
+  const cells: Array<{ key: string; distanceM: number }> = [];
   for (let y = from.y; y <= to.y; y += 1) {
     for (let x = from.x; x <= to.x; x += 1) {
       const index = { x, y };
-      if (distanceMeters(coord, fogCellCenter(index)) <= radiusM) {
-        keys.push(fogCellKeyFromIndex(index));
+      const distance = distanceMeters(coord, fogCellCenter(index));
+      if (distance <= radiusM) {
+        const key = fogCellKeyFromIndex(index);
+        cells.push({ key, distanceM: key === ownKey ? 0 : distance });
       }
     }
   }
-  return keys;
+  return cells.sort((a, b) => a.distanceM - b.distanceM).map((cell) => cell.key);
 }
 
 /** Cells revealed by a whole path, de-duplicated. */

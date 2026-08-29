@@ -121,7 +121,7 @@ export function RunPanel({
 
       <p className="muted" aria-live="polite">
         {(distanceM / 1000).toFixed(2)} km tracked · {status.fixes} fixes kept · {revealedCells}{' '}
-        cells cleared
+        cells covered
         {status.active && status.lastRejection
           ? ` · ${REJECTION_LABELS[status.lastRejection] ?? status.lastRejection}`
           : ''}
