@@ -108,14 +108,14 @@ tracking needs *cadence diversity*, not just more passes.
 ### E5 — robustness (F1, multi-pass)
 | knob | value | F1 |
 | --- | --- | --- |
-| sample rate | 50 Hz / 100 Hz / 200 Hz | 0.50 / 1.00 / 0.86 |
-| carry position | hand / pocket / backpack | 0.86 / 1.00 / 1.00 |
-| GPS noise | 1 m / 3 m / **8 m** | 0.86 / 0.86 / **0.29** |
-| sensor noise (m/s²) | 0.06 / 0.2 / 0.5 | 0.86 / 1.00 / 0.67 |
+| sample rate | 50 Hz / 100 Hz / 200 Hz | 0.50 / 0.80 / 0.86 |
+| carry position | hand / pocket / backpack | 0.86 / 0.86 / 1.00 |
+| GPS noise | 1 m / 3 m / **8 m** | 0.86 / 0.86 / **0.00** |
+| sensor noise (m/s²) | 0.06 / 0.2 / 0.5 | 0.86 / 1.00 / 0.86 |
 
 Two hard requirements fall out of this: **≥100 Hz sampling** and **GPS error
 ≲3 m**. At 50 Hz the shock band is truncated; at 8 m GPS error the anomaly is
-smeared across bins and localization collapses (F1 0.29) even though the anomaly
+smeared across bins and localization collapses entirely even though the anomaly
 is still *visible* in the residual.
 
 ## 4. Assumptions
@@ -147,8 +147,9 @@ is still *visible* in the residual.
   bridge vibration, other pedestrians, temperature-driven stiffness change (a
   well-documented cause of apparent modal shifts), running speed, fatigue, phone
   case, and OS-level sensor filtering differences between phone models.
-* The 200 Hz result being *worse* than 100 Hz (0.86 vs 1.00) is a scenario/seed
-  artifact, not evidence that more bandwidth hurts; do not read it as a ranking.
+* Differences of one event in the E5 table (0.86 vs 1.00) are scenario/seed
+  artifacts on a 3-anomaly route, not a ranking; only the large gaps (50 Hz,
+  8 m GPS) are meaningful.
 
 ## 6. Technical feasibility plan
 

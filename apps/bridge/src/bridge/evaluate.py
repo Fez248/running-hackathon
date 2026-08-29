@@ -43,15 +43,17 @@ def evaluate_detections(
     errors: list[float] = []
     tp = 0
     for det in detections:
-        hit = None
-        for i, gt in enumerate(truth):
-            if i in matched_gt:
-                continue
-            if _overlaps(det, gt, tol_m):
-                hit = i
-                break
-        if hit is None:
+        # Match the *nearest* unmatched overlapping anomaly, so scoring does not
+        # depend on the order of the input lists when tolerances make two
+        # anomalies eligible for the same detection.
+        candidates = [
+            (abs(det.peak_m - 0.5 * (gt.start_m + gt.end_m)), i)
+            for i, gt in enumerate(truth)
+            if i not in matched_gt and _overlaps(det, gt, tol_m)
+        ]
+        if not candidates:
             continue
+        hit = min(candidates)[1]
         matched_gt.add(hit)
         tp += 1
         center = 0.5 * (truth[hit].start_m + truth[hit].end_m)

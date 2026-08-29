@@ -93,9 +93,11 @@ def find_modes(
         keep = np.ones(peaks.size, dtype=bool)
         for k in range(1, 12):
             keep &= np.abs(fb[peaks] - k * f_step) > 0.5
-        if keep.any():
-            peaks = peaks[keep]
-            props = {"prominences": props["prominences"][keep]}
+        if not keep.any():
+            # Every candidate sits on a harmonic: this pass cannot observe a mode.
+            return []
+        peaks = peaks[keep]
+        props = {"prominences": props["prominences"][keep]}
     if peaks.size == 0:
         peaks, order = np.array([int(np.argmax(flat))]), np.array([0])
     else:

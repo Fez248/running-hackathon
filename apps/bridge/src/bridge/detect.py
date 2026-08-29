@@ -222,8 +222,9 @@ def modal_signature(
         d_samples = np.interp(pp.t, pp.window_t, pp.window_distance_m)
         sel = (d_samples >= span[0]) & (d_samples <= span[1])
         # Below ~4 s of data the frequency resolution is too coarse to compare passes.
-        if sel.sum() > pp.fs * 4:
-            vert = vert[sel]
+        if sel.sum() <= pp.fs * 4:
+            return None
+        vert = vert[sel]
     modes = find_modes(vert, pp.fs, f_range=f_range, f_step=pp.f_step, max_modes=1)
     if not modes:
         return None

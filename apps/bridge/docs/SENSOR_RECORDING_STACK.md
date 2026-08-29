@@ -27,7 +27,7 @@ Derived from `FEASIBILITY.md` and the E1–E5 experiment results:
 Requirements that fall out of this:
 
 - **Rate:** 100 Hz is the working minimum; 200 Hz is the target. E5 (synthetic) showed F1 0.5 at
-  50 Hz vs 1.0 at 100 Hz — 50 Hz is not enough for the shock band.
+  50 Hz vs 0.80–0.86 at 100–200 Hz — 50 Hz is not enough for the shock band.
 - **Timestamps:** per-sample device timestamps, monotonic, with jitter small relative to the
   shortest feature (~5 ms at 200 Hz). The pipeline resamples onto a uniform grid
   (`imukit.preprocess.resample_uniform`), so *jitter is tolerable if it is measured*; what is not
@@ -261,8 +261,8 @@ Synchronisation and calibration concerns:
    accelerometer at requested 200 Hz (fall back to 100 Hz if the delivered rate is lower) + gyro at
    the same rate + Core Location best-accuracy 1 Hz, background mode enabled.
 2. **Sensor placement:** phone in a **snug front pocket or waist belt**, one fixed orientation per
-   session; carry position recorded in the manifest. E5 (synthetic) showed hand-carry is the weakest
-   position. Never hand-held-while-filming.
+   session; carry position recorded in the manifest. E5 (synthetic) ranked a
+   torso/backpack-style mount above pocket and hand carry. Never hand-held-while-filming.
 3. **Protocol:** walk the same 100–200 m route **≥ 4 passes**, alternating direction, with the
    heel-stamp sync gesture at both ends. Note ground-truth anomaly locations by hand (photo + rough
    distance) — this is the label set.
@@ -310,7 +310,7 @@ already computes.
 | Decision | Choose | Why | Fallback |
 |---|---|---|---|
 | Recorder | Native Swift Core Motion (own module if RN) | Only stack with documented per-sample timestamps and controllable rate | RN/Expo at ~50 Hz (degrades detection; E5 F1 0.5) |
-| Rate | Request 200 Hz, accept ≥ 100 Hz | Shock band 20–45 Hz + `hf_frac` | 100 Hz |
+| Rate | Request 200 Hz, accept ≥ 100 Hz | Shock band 20–45 Hz + `hf_frac` | 100 Hz (50 Hz halves F1) |
 | Accel source | Raw accelerometer, own gravity split | Avoid undocumented fusion filtering | `CMDeviceMotion` userAcceleration |
 | Background | Core Location bg mode, auto-pause off | Documented route to survive screen lock | Screen-on, phone in pocket, low brightness |
 | Watch role | Gait covariates from standard activity FIT | Documented metrics, low integration risk | Phone-derived cadence |
