@@ -41,29 +41,39 @@ export interface LatLngBox {
  * min/max interval would either drop the far side of the date line or span the
  * planet. Latitude is clamped rather than folded over the pole, which widens
  * longitude to the whole world instead.
+ *
+ * Unlike `boundsAround`, the longitude half-width is taken at the edge of the
+ * box nearest a pole rather than at the centre, because a degree of longitude
+ * shrinks towards the poles: measuring it at the centre latitude would make the
+ * box a subset of the circle it is meant to contain.
  */
 export function radiusBoxes(center: Coordinate, radiusM: number): LatLngBox[] {
-  const box = boundsAround(center, radiusM);
-  const overPole = box.minLat < -90 || box.maxLat > 90;
-  const minLat = Math.max(-90, box.minLat);
-  const maxLat = Math.min(90, box.maxLat);
+  const latDelta = (radiusM / EARTH_RADIUS_M) * (180 / Math.PI);
+  const overPole = center.lat - latDelta < -90 || center.lat + latDelta > 90;
+  const minLat = Math.max(-90, center.lat - latDelta);
+  const maxLat = Math.min(90, center.lat + latDelta);
+  const poleward = Math.max(Math.abs(minLat), Math.abs(maxLat));
+  const lngDelta = latDelta / Math.max(Math.cos(toRadians(poleward)), 1e-12);
 
-  if (overPole || box.maxLng - box.minLng >= 360) {
+  if (overPole || lngDelta >= 180) {
     return [{ minLat, maxLat, minLng: -180, maxLng: 180 }];
   }
-  if (box.maxLng > 180) {
+
+  const minLng = center.lng - lngDelta;
+  const maxLng = center.lng + lngDelta;
+  if (maxLng > 180) {
     return [
-      { minLat, maxLat, minLng: box.minLng, maxLng: 180 },
-      { minLat, maxLat, minLng: -180, maxLng: box.maxLng - 360 },
+      { minLat, maxLat, minLng, maxLng: 180 },
+      { minLat, maxLat, minLng: -180, maxLng: maxLng - 360 },
     ];
   }
-  if (box.minLng < -180) {
+  if (minLng < -180) {
     return [
-      { minLat, maxLat, minLng: -180, maxLng: box.maxLng },
-      { minLat, maxLat, minLng: box.minLng + 360, maxLng: 180 },
+      { minLat, maxLat, minLng: -180, maxLng },
+      { minLat, maxLat, minLng: minLng + 360, maxLng: 180 },
     ];
   }
-  return [{ minLat, maxLat, minLng: box.minLng, maxLng: box.maxLng }];
+  return [{ minLat, maxLat, minLng, maxLng }];
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));

@@ -183,11 +183,14 @@ How the verdict is reached (`libs/core/src/passability.ts`):
   evidence against the street — but its measurements still can rule the street out for a profile.
 - `surveyed` separates the two kinds of `UNKNOWN`: `surveyed: true` means someone walked here (a
   report or revealed fog) and flagged nothing, `surveyed: false` means the map has never seen the
-  place. A planner should treat only the second as a blind spot.
+  place. A planner should treat only the second as a blind spot. A resolved or rejected report no
+  longer says anything about passability, but it still proves someone was here, so it keeps counting
+  towards `surveyed` while staying out of the verdict.
 
 `radiusM` is capped at 200 m per waypoint, so no single call can scan a city. A leg is read with one
 query per table while that read stays under its row cap; if a dense stretch fills it, each waypoint is
-re-read against its own radius, so a busy neighbourhood cannot starve the waypoints after it.
+re-read against its own radius and paged to the end, so a busy neighbourhood cannot starve the
+waypoints after it and no row inside a radius is dropped before the distance filter runs.
 
 ## Stack
 

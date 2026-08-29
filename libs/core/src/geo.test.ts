@@ -69,6 +69,33 @@ describe('radiusBoxes', () => {
     }
   });
 
+  it('contains every point on the circle it is built for', () => {
+    for (const centre of [
+      { lat: 52.52, lng: 13.4 },
+      { lat: -33.87, lng: 151.2 },
+      { lat: 78.2, lng: 15.6 },
+    ]) {
+      const boxes = radiusBoxes(centre, 200);
+      for (let bearing = 0; bearing < 360; bearing += 15) {
+        const rad = (bearing * Math.PI) / 180;
+        const latDelta = ((200 * Math.cos(rad)) / 6_371_008.8) * (180 / Math.PI);
+        const lat = centre.lat + latDelta;
+        const lngDelta =
+          ((200 * Math.sin(rad)) / 6_371_008.8) *
+          (180 / Math.PI) /
+          Math.cos((lat * Math.PI) / 180);
+        expect(contains(boxes, { lat, lng: centre.lng + lngDelta })).toBe(true);
+      }
+    }
+  });
+
+  it('covers a circle just short of the pole, which a centre-latitude box would clip', () => {
+    // A degree of longitude is ~4 m wide at 89.998°: measured at the centre the
+    // box would exclude points barely 190 m away.
+    const boxes = radiusBoxes({ lat: 89.998, lng: 0 }, 200);
+    expect(contains(boxes, { lat: 89.998, lng: 51.6 })).toBe(true);
+  });
+
   it('widens to the whole world at the pole, where every longitude is near', () => {
     const boxes = radiusBoxes({ lat: 89.9999, lng: 12 }, 200);
     expect(boxes).toEqual([{ minLat: expect.any(Number), maxLat: 90, minLng: -180, maxLng: 180 }]);
