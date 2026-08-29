@@ -53,6 +53,59 @@ def highpass(x: np.ndarray, fs: float, cutoff: float, order: int = 4) -> np.ndar
     return sosfiltfilt(_sos("high", cutoff, fs, order), x, axis=0)
 
 
+def dc_magnitude(accel: np.ndarray, fs: float, cutoff: float = 0.4) -> float:
+    """Median magnitude of the sub-``cutoff`` component of ``accel``.
+
+    Gait and orientation changes live above that cutoff, so the low-passed norm
+    is ~g for a gravity-carrying stream and ~0 for a linear/user-acceleration
+    one however vigorous the motion — the mean raw norm is not, because hard
+    running averages well above 0.5 g with gravity already removed.
+
+    Its unit is the stream's own, which is what makes it usable both as a
+    gravity test and as the scale test that tells g from m/s^2.
+    """
+    accel = np.asarray(accel, dtype=float)
+    if fs <= 4 * cutoff or accel.shape[0] < 64:
+        return float(np.linalg.norm(np.mean(accel, axis=0)))
+    return float(np.median(np.linalg.norm(lowpass(accel, fs, cutoff), axis=1)))
+
+
+def dc_steadiness(accel: np.ndarray, fs: float, cutoff: float = 0.4) -> float:
+    """Spread of the sub-``cutoff`` norm relative to its median (IQR / median).
+
+    Gravity is a constant: whatever unit it is reported in, and however the
+    phone is carried, the low-passed norm of a stream that carries it barely
+    moves. A linear-acceleration stream's low-passed norm is drift, so it
+    wanders over its own scale. That difference is unit-free, which is what lets
+    it tell a 1 g stream from a gravity-free stream whose drift happens to sit
+    at 1 m/s^2 — the two are indistinguishable by magnitude alone.
+    """
+    accel = np.asarray(accel, dtype=float)
+    if fs <= 4 * cutoff or accel.shape[0] < 64:
+        return float("inf")
+    norm = np.linalg.norm(lowpass(accel, fs, cutoff), axis=1)
+    median = float(np.median(norm))
+    if median <= 1e-9:
+        return float("inf")
+    return float(np.subtract(*np.percentile(norm, [75, 25])) / median)
+
+
+def ac_rms(accel: np.ndarray, fs: float, cutoff: float = 0.4) -> float:
+    """RMS magnitude of the above-``cutoff`` component of ``accel``, in its own unit.
+
+    Paired with :func:`dc_magnitude` it says whether a DC term is a steady pull
+    or just drift: gravity is a constant of the stream's scale, so a
+    gravity-carrying stream has a DC comparable to its motion, while a
+    linear-acceleration stream's residual DC is small next to it.
+    """
+    accel = np.asarray(accel, dtype=float)
+    if fs <= 4 * cutoff or accel.shape[0] < 64:
+        centred = accel - np.mean(accel, axis=0)
+    else:
+        centred = accel - lowpass(accel, fs, cutoff)
+    return float(np.sqrt(np.mean(np.sum(centred**2, axis=1))))
+
+
 def gravity_split(trace: ImuTrace, cutoff: float = 0.4) -> tuple[np.ndarray, np.ndarray]:
     """Split accel into vertical (gravity-aligned) and horizontal magnitude.
 

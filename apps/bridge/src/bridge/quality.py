@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from imukit.geo import cumulative_distance
-from imukit.preprocess import G, lowpass
+from imukit.preprocess import G, dc_magnitude
 
 from .ingest import Recording
 
@@ -49,19 +49,6 @@ def _shock_band_covered(fs: float) -> float:
     """
     lo, hi = SHOCK_BAND_HZ
     return round(float(np.clip((fs / 2.0 - lo) / (hi - lo), 0.0, 1.0)), 6)
-
-
-def _dc_magnitude(accel: np.ndarray, fs: float) -> float:
-    """Median magnitude of the sub-``GRAVITY_CUTOFF_HZ`` component of ``accel``.
-
-    Gait and orientation changes live above that cutoff, so the low-passed norm
-    is ~g for a gravity-carrying stream and ~0 for a linear/user-acceleration
-    one however vigorous the motion — the mean raw norm is not, because hard
-    running averages well above 0.5 g with gravity already removed.
-    """
-    if fs <= 4 * GRAVITY_CUTOFF_HZ or accel.shape[0] < 64:
-        return float(np.linalg.norm(np.mean(accel, axis=0)))
-    return float(np.median(np.linalg.norm(lowpass(accel, fs, GRAVITY_CUTOFF_HZ), axis=1)))
 
 
 @dataclass
@@ -113,7 +100,7 @@ def assess(rec: Recording) -> CaptureQuality:
     dt = np.diff(t)
     dt_med = float(np.median(dt)) if dt.size else 0.0
     fs = 1.0 / dt_med if dt_med > 0 else 0.0
-    dc_mag = _dc_magnitude(rec.trace.accel, fs)
+    dc_mag = dc_magnitude(rec.trace.accel, fs, GRAVITY_CUTOFF_HZ)
     lo_g, hi_g = GRAVITY_BAND_G
     q = CaptureQuality(
         fs_hz=fs,
@@ -150,8 +137,9 @@ def assess(rec: Recording) -> CaptureQuality:
     if not q.gravity_present:
         _fail(
             q,
-            f"DC |a| is {dc_mag:.2f} m/s², not ~{G:.1f}: gravity removed (linear-acceleration "
-            "stream), so the vertical axis cannot be projected",
+            f"DC |a| is {dc_mag:.2f} m/s^2, not ~{G:.1f}: gravity removed (linear-acceleration "
+            "stream), so the vertical axis cannot be projected; if the export has a Gravity.csv "
+            "the ingester reconstructs the total, otherwise record total acceleration",
         )
     if q.dropout_frac > MAX_DROPOUT_FRAC:
         _warn(q, f"{q.dropout_frac * 100:.1f}% of sample gaps are >3x nominal (dropped samples)")
