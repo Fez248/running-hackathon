@@ -1,0 +1,150 @@
+"""Ingest, quality gate and scan: the real-recording path."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+from imukit.geo import cumulative_distance, position_at_distance
+
+from bridge.experiments import ROUTE_ANOMALIES
+from bridge.ingest import load_recording, write_export_dir
+from bridge.quality import assess
+from bridge.scan import scan_recording, to_csv, to_geojson
+from bridge.synth import SurfaceScenario, simulate_pass
+
+SENSORLOGGER_ACCEL = """time,seconds_elapsed,z,y,x
+1700000000000000000,0.000000,9.800000,0.100000,0.200000
+1700000000005000000,0.005000,9.810000,0.110000,0.210000
+1700000000010000000,0.010000,9.790000,0.090000,0.190000
+"""
+PHYPHOX_ACCEL = '''"Time (s)";"Acceleration x (m/s^2)";"Acceleration y (m/s^2)";"Acceleration z (m/s^2)"
+0.000000;0.200000;0.100000;9.800000
+0.005000;0.210000;0.110000;9.810000
+0.010000;0.190000;0.090000;9.790000
+'''
+PHYPHOX_LOCATION = '''"Time (s)";"Latitude (°)";"Longitude (°)";"Horizontal Accuracy (m)"
+0.000000;51.500000;-0.124000;3.0
+5.000000;51.500100;-0.124000;3.2
+'''
+
+
+def _short_pass(**overrides):
+    scn = SurfaceScenario(seed=3, anomalies=list(ROUTE_ANOMALIES), **overrides)
+    trace, gps, truth = simulate_pass(scn)
+    return trace, gps, truth
+
+
+def test_sensorlogger_export_round_trip(tmp_path):
+    trace, gps, _ = _short_pass(length_m=120.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+    rec = load_recording(tmp_path / "rec")
+
+    assert rec.format == "sensorlogger"
+    assert rec.gps is not None
+    assert rec.trace.fs == pytest.approx(200.0, rel=1e-3)
+    assert len(rec.trace) == len(trace)
+    # Timestamps are written as epoch ns and must come back as relative seconds.
+    assert rec.trace.t[0] == pytest.approx(0.0, abs=1e-6)
+    assert np.allclose(rec.trace.accel, trace.accel, atol=1e-5)
+    assert np.allclose(rec.gps.lat, gps.lat, atol=1e-6)
+
+
+def test_zip_export_is_read_like_a_directory(tmp_path):
+    import zipfile
+
+    trace, gps, _ = _short_pass(length_m=90.0)
+    src = tmp_path / "rec"
+    write_export_dir(src, trace, gps)
+    archive = tmp_path / "rec.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for f in sorted(src.iterdir()):
+            zf.write(f, f.name)
+
+    rec = load_recording(archive)
+    assert len(rec.trace) == len(trace)
+    assert rec.gps is not None
+
+
+def test_sensorlogger_and_phyphox_headers_parse(tmp_path):
+    sl = tmp_path / "sl"
+    sl.mkdir()
+    (sl / "TotalAcceleration.csv").write_text(SENSORLOGGER_ACCEL)
+    px = tmp_path / "px"
+    px.mkdir()
+    (px / "Accelerometer.csv").write_text(PHYPHOX_ACCEL)
+    (px / "Location.csv").write_text(PHYPHOX_LOCATION)
+
+    a = load_recording(sl)
+    b = load_recording(px)
+    # Same three samples, whatever the header wording, delimiter or axis order.
+    assert np.allclose(a.trace.accel, b.trace.accel)
+    assert a.trace.t[-1] == pytest.approx(0.01)
+    assert b.gps is not None and b.gps.accuracy_m is not None
+    assert a.gps is None and any("no GPS" in n for n in a.notes)
+
+
+def test_generic_csv_with_separate_gps(tmp_path):
+    accel = tmp_path / "accel.csv"
+    accel.write_text("t,ax,ay,az\n0.0,0.1,0.2,9.8\n0.01,0.1,0.2,9.8\n")
+    gps = tmp_path / "gps.csv"
+    gps.write_text("t,lat,lon,accuracy_m\n0.0,51.5,-0.124,4.0\n1.0,51.5001,-0.124,4.0\n")
+
+    rec = load_recording(accel, gps)
+    assert rec.format == "csv"
+    assert rec.gps is not None
+    assert rec.gps.accuracy_m[0] == pytest.approx(4.0)
+
+
+def test_gravity_free_stream_is_rejected_by_the_quality_gate(tmp_path):
+    d = tmp_path / "linear"
+    d.mkdir()
+    rows = "\n".join(f"{i * 0.005:.3f},0.1,0.2,0.3" for i in range(40_000))
+    (d / "LinearAcceleration.csv").write_text("seconds_elapsed,x,y,z\n" + rows + "\n")
+
+    q = assess(load_recording(d))
+    assert not q.gravity_present
+    assert q.verdict == "unusable"
+    assert any("gravity" in p for p in q.problems)
+
+
+def test_low_sample_rate_and_bad_gps_fail_the_gate(tmp_path):
+    trace, gps, _ = _short_pass(fs=50.0, gps_noise_m=8.0)
+    gps.accuracy_m = np.full(gps.t.size, 8.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    result, pp = scan_recording(load_recording(tmp_path / "rec"))
+    assert pp is None
+    assert result.findings == []
+    assert result.quality.verdict == "unusable"
+    assert any("100 Hz" in p for p in result.quality.problems)
+    assert any("GPS accuracy" in p for p in result.quality.problems)
+
+
+def test_scan_of_a_good_recording_finds_and_locates_anomalies(tmp_path):
+    trace, gps, truth = _short_pass()
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    result, _pp = scan_recording(load_recording(tmp_path / "rec"))
+    assert result.quality.verdict == "ok"
+    assert result.cadence_spm > 100
+    assert result.findings, "expected at least one finding on the seeded anomalous route"
+
+    slab = min(result.findings, key=lambda f: abs(f.peak_m - 84.0))
+    assert abs(slab.peak_m - 84.0) < 15.0
+    assert slab.kind == "loose_or_broken_element"
+    assert slab.lat is not None and slab.lon is not None
+    # Every finding must sit on the recorded track, not somewhere off-route.
+    assert min(abs(gps.lat - slab.lat)) < 1e-3
+
+    gj = to_geojson(result)
+    assert len(gj["features"]) == len(result.findings)
+    assert gj["features"][0]["properties"]["sidewalkMapKind"] == "ROUGH_SURFACE"
+    assert to_csv(result).count("\n") == len(result.findings) + 1
+
+
+def test_position_at_distance_inverts_cumulative_distance():
+    _trace, gps, _ = _short_pass(length_m=200.0, gps_noise_m=0.0)
+    d = cumulative_distance(gps, smooth_s=5.0)
+    lat, lon = position_at_distance(gps, np.array([d[10], d[40]]))
+    assert lat[0] == pytest.approx(gps.lat[10], abs=1e-4)
+    assert lon[1] == pytest.approx(gps.lon[40], abs=1e-4)

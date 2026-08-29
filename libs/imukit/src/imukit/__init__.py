@@ -6,7 +6,14 @@ of re-implementing filtering, cadence tracking or robust baselines.
 
 from .cadence import cadence_spm, detect_footfalls, estimate_step_frequency, stride_segments
 from .features import band_energy, psd, spectral_entropy, window_features
-from .geo import aggregate_by_bin, bin_index, cumulative_distance, distance_at_times, haversine_m
+from .geo import (
+    aggregate_by_bin,
+    bin_index,
+    cumulative_distance,
+    distance_at_times,
+    haversine_m,
+    position_at_distance,
+)
 from .modal import Mode, find_modes, frequency_shift, half_power_damping, modal_psd, notch_harmonics
 from .preprocess import G, bandpass, gravity_split, highpass, lowpass, resample_uniform
 from .robust import ewma_update, leave_one_out_z, mad, robust_z
@@ -39,6 +46,7 @@ __all__ = [
     "mad",
     "modal_psd",
     "notch_harmonics",
+    "position_at_distance",
     "psd",
     "resample_uniform",
     "robust_z",

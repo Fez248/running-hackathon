@@ -22,3 +22,17 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e libs/imukit -e 'apps/bridge[dev]'
+      - run: python -m pytest -q
+        working-directory: apps/bridge
+      - run: python -m ruff check apps/bridge libs/imukit
+      - run: python -m bridge.cli scan --demo --out /tmp/findings.json
+        working-directory: apps/bridge
