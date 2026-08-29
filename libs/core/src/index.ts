@@ -6,3 +6,4 @@ export * from './fog';
 export * from './gps';
 export * from './voice';
 export * from './voice-capture';
+export * from './review';

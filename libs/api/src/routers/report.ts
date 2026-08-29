@@ -5,8 +5,11 @@ import {
   confidence,
   createReportSchema,
   gridKey,
+  needsReview,
   parseVoiceReport,
   passabilityForProfile,
+  PENDING_REVIEW,
+  voiceGate,
   type Passability,
   voiceReportSchema,
   voteSchema,
@@ -48,8 +51,15 @@ export const reportRouter = createTRPCRouter({
     return report;
   }),
 
-  /** One-tap capture while running/riding. Idempotent on clientReportId. */
+  /**
+   * One-tap capture while running/riding. Idempotent on clientReportId.
+   *
+   * A caller may submit `source: 'VOICE'` here too, so the same server-side
+   * review gate applies: a dictation the server cannot corroborate is queued
+   * rather than published, whichever procedure it arrives through.
+   */
   create: publicProcedure.input(createReportSchema).mutation(async ({ ctx, input }) => {
+    const gate = voiceGate(input.source, input.transcript);
     const data = {
       lat: input.lat,
       lng: input.lng,
@@ -67,7 +77,11 @@ export const reportRouter = createTRPCRouter({
       traceId: input.traceId ?? null,
       clientReportId: input.clientReportId ?? null,
       authorId: ctx.user?.id ?? null,
-      confidence: confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }),
+      parseConfidence: gate.parseConfidence,
+      status: gate.status,
+      confidence:
+        confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }) *
+        (gate.parseConfidence ?? 1),
     };
 
     // Upsert rather than check-then-create: a retry racing the first attempt
@@ -87,17 +101,29 @@ export const reportRouter = createTRPCRouter({
    * GPS fix it was spoken at. The server re-parses the transcript so the stored
    * report never depends on the client's parser version, and returns `null` when
    * the utterance named no sidewalk feature (ambient chatter).
+   *
+   * A parse the server is not confident about is stored `PENDING_REVIEW` rather
+   * than published: a guess about a curb is worse than a short delay for the
+   * person who has to get past it. `review.queue` picks those up.
    */
   createFromVoice: publicProcedure.input(voiceReportSchema).mutation(async ({ ctx, input }) => {
     if (input.clientReportId) {
       const existing = await ctx.prisma.report.findUnique({
         where: { clientReportId: input.clientReportId },
       });
-      if (existing) return { report: existing, parsed: null, ignored: false };
+      if (existing)
+        return {
+          report: existing,
+          parsed: null,
+          ignored: false,
+          pendingReview: existing.status === PENDING_REVIEW,
+        };
     }
 
     const parsed = parseVoiceReport(input.transcript, input.recognitionConfidence);
-    if (!parsed) return { report: null, parsed: null, ignored: true };
+    if (!parsed) return { report: null, parsed: null, ignored: true, pendingReview: false };
+
+    const pendingReview = needsReview(parsed.parseConfidence);
 
     const data = {
       lat: input.lat,
@@ -116,6 +142,8 @@ export const reportRouter = createTRPCRouter({
       traceId: input.traceId ?? null,
       clientReportId: input.clientReportId ?? null,
       authorId: ctx.user?.id ?? null,
+      parseConfidence: parsed.parseConfidence,
+      status: pendingReview ? PENDING_REVIEW : 'ACTIVE',
       confidence:
         confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }) *
         parsed.parseConfidence,
@@ -129,7 +157,7 @@ export const reportRouter = createTRPCRouter({
         })
       : await ctx.prisma.report.create({ data });
 
-    return { report, parsed, ignored: false };
+    return { report, parsed, ignored: false, pendingReview };
   }),
 
   /** Offline queue flush: send everything captured while out of signal. */
@@ -138,6 +166,7 @@ export const reportRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const ids: string[] = [];
       for (const report of input.reports) {
+        const gate = voiceGate(report.source, report.transcript);
         const data = {
           lat: report.lat,
           lng: report.lng,
@@ -155,11 +184,14 @@ export const reportRouter = createTRPCRouter({
           traceId: report.traceId ?? null,
           clientReportId: report.clientReportId ?? null,
           authorId: ctx.user?.id ?? null,
-          confidence: confidence({
-            agreeCount: 0,
-            disagreeCount: 0,
-            accuracyM: report.accuracyM,
-          }),
+          parseConfidence: gate.parseConfidence,
+          status: gate.status,
+          confidence:
+            confidence({
+              agreeCount: 0,
+              disagreeCount: 0,
+              accuracyM: report.accuracyM,
+            }) * (gate.parseConfidence ?? 1),
         };
 
         const row = report.clientReportId
@@ -180,28 +212,43 @@ export const reportRouter = createTRPCRouter({
    * by repeating the call.
    */
   vote: protectedProcedure.input(voteSchema).mutation(async ({ ctx, input }) => {
-    const report = await ctx.prisma.report.findUnique({ where: { id: input.reportId } });
-    if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
-
-    await ctx.prisma.vote.upsert({
-      where: { reportId_userId: { reportId: input.reportId, userId: ctx.user.id } },
-      update: { agree: input.agree },
-      create: { reportId: input.reportId, userId: ctx.user.id, agree: input.agree },
-    });
-
-    const [agreeCount, disagreeCount] = await Promise.all([
-      ctx.prisma.vote.count({ where: { reportId: input.reportId, agree: true } }),
-      ctx.prisma.vote.count({ where: { reportId: input.reportId, agree: false } }),
-    ]);
-
-    return ctx.prisma.report.update({
+    const exists = await ctx.prisma.report.findUnique({
       where: { id: input.reportId },
-      data: {
-        agreeCount,
-        disagreeCount,
-        confidence: confidence({ agreeCount, disagreeCount, accuracyM: report.accuracyM }),
-        status: disagreeCount >= 3 && disagreeCount > agreeCount * 2 ? 'REJECTED' : report.status,
-      },
+      select: { id: true },
+    });
+    if (!exists) throw new TRPCError({ code: 'NOT_FOUND' });
+
+    // One transaction, and the report is re-read inside it: a review decided
+    // between the vote arriving and the tally being written must not be undone
+    // by a stale `status`, nor its lifted parse penalty reapplied.
+    return ctx.prisma.$transaction(async (tx) => {
+      await tx.vote.upsert({
+        where: { reportId_userId: { reportId: input.reportId, userId: ctx.user.id } },
+        update: { agree: input.agree },
+        create: { reportId: input.reportId, userId: ctx.user.id, agree: input.agree },
+      });
+
+      const [agreeCount, disagreeCount, report] = await Promise.all([
+        tx.vote.count({ where: { reportId: input.reportId, agree: true } }),
+        tx.vote.count({ where: { reportId: input.reportId, agree: false } }),
+        tx.report.findUniqueOrThrow({ where: { id: input.reportId } }),
+      ]);
+      const buried = disagreeCount >= 3 && disagreeCount > agreeCount * 2;
+
+      return tx.report.update({
+        where: { id: input.reportId },
+        data: {
+          agreeCount,
+          disagreeCount,
+          // Votes cannot buy away the parser's doubt: until a human has read the
+          // transcript, a half-understood dictation stays discounted however
+          // many people agree with it.
+          confidence:
+            confidence({ agreeCount, disagreeCount, accuracyM: report.accuracyM }) *
+            (report.reviewedAt ? 1 : (report.parseConfidence ?? 1)),
+          status: buried ? 'REJECTED' : report.status,
+        },
+      });
     });
   }),
 

@@ -100,9 +100,16 @@ export function MapWorkspace() {
   const createFromVoice = api.report.createFromVoice.useMutation({
     onSuccess: (result) => {
       if (result.ignored) return;
+      const where = result.report
+        ? `${result.report.lat.toFixed(5)}, ${result.report.lng.toFixed(5)}`
+        : null;
       setVoiceStatus(
         result.report
-          ? `Logged “${result.report.note ?? ''}” at ${result.report.lat.toFixed(5)}, ${result.report.lng.toFixed(5)}`
+          ? result.pendingReview
+            ? // Tell the reporter their words were kept even though the map has
+              // not changed, so a queued report does not read as a lost one.
+              `Heard “${result.report.transcript ?? ''}” at ${where} but only half understood it — held for review.`
+            : `Logged “${result.report.note ?? ''}” at ${where}`
           : null,
       );
       void utils.report.byBounds.invalidate();
