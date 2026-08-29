@@ -51,10 +51,14 @@ export const reportRouter = createTRPCRouter({
       },
       orderBy: { createdAt: 'desc' },
       take: input.limit,
+      // A sensor report has to state the verdict of the capture behind it
+      // wherever it appears, so the map never has to ask for it separately.
+      include: { surfaceScan: { select: { verdict: true } } },
     });
 
-    return reports.map((report) => ({
+    return reports.map(({ surfaceScan, ...report }) => ({
       ...report,
+      captureVerdict: surfaceScan?.verdict ?? null,
       effectivePassability: input.profile
         ? passabilityForProfile(input.profile, {
             heightCm: report.heightCm,
@@ -68,7 +72,7 @@ export const reportRouter = createTRPCRouter({
   byId: publicProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
     const report = await ctx.prisma.report.findUnique({
       where: { id: input.id },
-      include: { author: true, votes: true },
+      include: { author: true, votes: true, surfaceScan: true },
     });
     if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
     return report;

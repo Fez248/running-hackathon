@@ -7,6 +7,8 @@ import {
   OBSTACLE_KINDS,
   OBSTACLE_LABELS,
   PROFILES,
+  reportProvenanceLine,
+  reportSourceMark,
   type ObstacleKind,
   type Profile,
 } from '@sidewalk/core';
@@ -333,8 +335,10 @@ export function MapWorkspace() {
               <div className="muted">
                 confidence {(report.confidence * 100).toFixed(0)}% · +{report.agreeCount}/-
                 {report.disagreeCount}
-                {report.source === 'VOICE' ? ' · dictated' : ''}
-                {report.source === 'SENSOR' ? ' · sensed by phone' : ''}
+              </div>
+              <div className="source-tag" data-source={reportSourceMark(report.source).source}>
+                <span aria-hidden="true">{reportSourceMark(report.source).glyph}</span>{' '}
+                {reportProvenanceLine(report)}
               </div>
             </div>
           ))}

@@ -10,4 +10,6 @@ export * from './voice';
 export * from './voice-capture';
 export * from './review';
 export * from './scan';
+export * from './scan-upload';
+export * from './report-source';
 export * from './sensor-logger';

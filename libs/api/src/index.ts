@@ -10,6 +10,16 @@ export {
   type SensorLoggerUploadStore,
 } from './integrations/sensor-logger';
 export {
+  handleRawScanUpload,
+  handleScanWorkerStatus,
+  scanWorkerConfigFromEnv,
+  scanWorkerStatus,
+  type ScanWorkerConfig,
+  type ScanWorkerDeps,
+  type ScanWorkerStatus,
+} from './integrations/scan-worker';
+export { scanWorkerDeps } from './integrations/scan-worker-store';
+export {
   createSensorReports,
   prismaSensorLoggerStore,
   sensorLoggerDeps,

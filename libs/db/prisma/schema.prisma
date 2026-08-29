@@ -111,6 +111,22 @@ model SurfaceScan {
   /// Reports actually created from this scan (0 for an unusable capture).
   reportCount  Int @default(0)
 
+  /// Capture provenance (see @sidewalk/core scanProvenanceSchema). Null on a
+  /// scan uploaded from a bridge build that predates the provenance block.
+  /// Recording app and its version, e.g. "Sensor Logger" / "1.36".
+  recorderApp     String?
+  recorderVersion String?
+  /// Phone the recording was made on, and its platform.
+  deviceModel String?
+  platform    String?
+  /// Sample rate asked of the recorder against the rate the export delivered.
+  requestedFsHz Float?
+  measuredFsHz  Float?
+  /// Factor applied at ingest to reach m/s² (1 for m/s², ~9.81 for g).
+  unitScale Float?
+  /// Robust-z threshold the detector ran at.
+  detectorThreshold Float?
+
   uploadedById String?
 
   createdAt DateTime @default(now())

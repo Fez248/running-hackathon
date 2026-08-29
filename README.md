@@ -74,10 +74,17 @@ recorded walk becomes `ROUGH_SURFACE` reports:
 python -m bridge.cli scan ~/Downloads/run.zip --format map --out scan.json
 ```
 
+Or skip the CLI: the scan panel also takes the **raw** Sensor Logger export (`.zip` or
+the unzipped folder) where a scan worker is configured, and prints this exact command,
+with your own file name in it, where one is not. Worker contract, the local worker
+(`uv run python -m bridge.worker`) and the provenance stored per scan are in
+[docs/RAW_SCAN_UPLOAD.md](./docs/RAW_SCAN_UPLOAD.md).
+
 Upload `scan.json` in the **Import bridge scan** panel. The panel shows the capture
 certificate (sample rate, duration, GPS accuracy, verdict and the problems behind it)
-before anything is sent, and sensor-derived reports are drawn with a dotted outline and
-labelled "sensed by phone" so their provenance stays visible next to human reports.
+before anything is sent, and sensor-derived reports are drawn as a diamond and labelled
+"measured by phone sensors", with the verdict of the capture that produced them, so their
+provenance stays visible next to human reports without relying on colour.
 
 Two rules the seam preserves:
 
