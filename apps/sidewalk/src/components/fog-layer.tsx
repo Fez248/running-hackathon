@@ -2,8 +2,13 @@
 
 import { useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
-import L from 'leaflet';
-import { fogCellKey, type FogBounds } from '@sidewalk/core';
+import L, { type Map as LeafletMap } from 'leaflet';
+import {
+  fogCellBounds,
+  fogCellIndexFromKey,
+  fogCellKey,
+  type FogBounds,
+} from '@sidewalk/core';
 
 export interface FogCell {
   cellKey: string;
@@ -27,6 +32,63 @@ const HEX_WORLD_SIZE = 26;
 const CLEAR_ANIMATION_MS = 900;
 
 const SQRT3 = Math.sqrt(3);
+
+/**
+ * Every fog cell revealed in this session, in insertion order.
+ *
+ * Reveals are monotonic: cells are only ever added. The store lives outside the
+ * component because both of its inputs are transient — server coverage queries
+ * are viewport-scoped, a run's pending reveals are dropped when it stops, and
+ * the layer itself is remounted whenever the map is — so any state derived from
+ * them would re-fog ground the runner has already taken.
+ */
+const revealedCells = new Set<string>();
+const revealedOrder: string[] = [];
+
+function rememberCell(cellKey: string): void {
+  if (revealedCells.has(cellKey)) return;
+  revealedCells.add(cellKey);
+  revealedOrder.push(cellKey);
+}
+
+/**
+ * Revealed cells projected onto the hex grid of one integer zoom, cached and
+ * extended as the revealed set grows.
+ *
+ * A tile can be larger or smaller than a fog cell depending on the zoom, so
+ * matching only in one direction loses reveals: mapping cells onto tiles covers
+ * the zoomed-out case (many cells inside one tile), while looking a tile's own
+ * centre up in the revealed set covers the zoomed-in case (many tiles inside
+ * one cell).
+ */
+const tilesByZoom = new Map<number, { tiles: Set<string>; consumed: number }>();
+
+function revealedTilesAtZoom(map: LeafletMap, baseZoom: number): Set<string> {
+  let entry = tilesByZoom.get(baseZoom);
+  if (!entry) {
+    entry = { tiles: new Set<string>(), consumed: 0 };
+    tilesByZoom.set(baseZoom, entry);
+  }
+  for (let i = entry.consumed; i < revealedOrder.length; i += 1) {
+    const index = fogCellIndexFromKey(revealedOrder[i]!);
+    if (!index) continue;
+    const b = fogCellBounds(index);
+    const corners: Array<[number, number]> = [
+      [(b.minLat + b.maxLat) / 2, (b.minLng + b.maxLng) / 2],
+      [b.minLat, b.minLng],
+      [b.minLat, b.maxLng],
+      [b.maxLat, b.minLng],
+      [b.maxLat, b.maxLng],
+    ];
+    for (const [lat, lng] of corners) {
+      const point = map.project(L.latLng(lat, lng), baseZoom);
+      const axial = axialFromPixel(point.x, point.y, HEX_WORLD_SIZE);
+      entry.tiles.add(`${axial.q}:${axial.r}`);
+    }
+  }
+  entry.consumed = revealedOrder.length;
+  return entry.tiles;
+}
 
 /**
  * Drifting mist, baked once into a tiling canvas: soft blots of pale grey over
@@ -127,15 +189,6 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
   const drawRef = useRef<() => void>(() => {});
   /** Tile id -> timestamp it was first seen cleared, for the flash. */
   const clearedAtRef = useRef<Map<string, number>>(new Map());
-  /**
-   * Every fog cell this session has ever seen revealed. Server queries are
-   * viewport-scoped and a run's pending reveals are dropped when it stops, so
-   * derived state would re-fog ground the runner already took. Reveals are
-   * monotonic: this set only grows.
-   */
-  const revealedRef = useRef<Set<string>>(new Set());
-  /** Tiles cleared by passing the runner over them, kept for the same reason. */
-  const clearedTilesRef = useRef<Set<string>>(new Set());
   const mistRef = useRef<CanvasPattern | null>(null);
   const seededRef = useRef(false);
   const frameRef = useRef<number | null>(null);
@@ -175,22 +228,24 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
       }
       L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
 
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx.clearRect(0, 0, size.x, size.y);
-      if (!visible) return;
-
-      const revealed = revealedRef.current;
-      for (const cell of cells) revealed.add(cell.cellKey);
+      // Recorded before the visibility check: hiding the fog must not drop
+      // reveals that arrive while it is off.
+      for (const cell of cells) rememberCell(cell.cellKey);
       for (const bounds of pendingBounds) {
-        revealed.add(
+        rememberCell(
           fogCellKey({
             lat: (bounds.minLat + bounds.maxLat) / 2,
             lng: (bounds.minLng + bounds.maxLng) / 2,
           }),
         );
       }
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, size.x, size.y);
+      if (!visible) return;
+
       if (!mistRef.current) mistRef.current = createMistPattern(ctx);
 
       // Tile grid: anchored at the nearest integer zoom, scaled by the rest.
@@ -251,6 +306,7 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
       }
       const tiles: Tile[] = [];
       const margin = hexScreen * 1.2;
+      const revealedTiles = revealedTilesAtZoom(map, baseZoom);
       for (let r = minR; r <= maxR; r += 1) {
         for (let q = minQ; q <= maxQ; q += 1) {
           const world = pixelFromAxial(q, r, HEX_WORLD_SIZE);
@@ -265,16 +321,16 @@ export function FogLayer({ cells, pendingBounds, liveHole, opacity, visible }: F
           }
           const id = `${baseZoom}:${q}:${r}`;
           const latLng = map.unproject(L.point(world.x, world.y), baseZoom).wrap();
-          let cleared =
-            clearedTilesRef.current.has(id) ||
-            revealed.has(fogCellKey({ lat: latLng.lat, lng: latLng.lng }));
+          const cellKey = fogCellKey({ lat: latLng.lat, lng: latLng.lng });
+          let cleared = revealedTiles.has(`${q}:${r}`) || revealedCells.has(cellKey);
           if (!cleared && liveCenter) {
             const dx = screen.x - liveCenter.x;
             const dy = screen.y - liveCenter.y;
             cleared = dx * dx + dy * dy <= liveRadiusPx * liveRadiusPx;
+            // Ground the runner passed over is remembered by coordinate, so it
+            // stays clear at every zoom level and after every re-render.
+            if (cleared) rememberCell(cellKey);
           }
-          // Taken ground stays taken, whatever the next server query returns.
-          if (cleared) clearedTilesRef.current.add(id);
           tiles.push({ id, q, r, cx: screen.x, cy: screen.y, cleared });
         }
       }
