@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { obstacleKindSchema, passabilitySchema, type Passability } from './obstacles';
+import { parseVoiceReport } from './voice';
 
 /**
  * Quality control for dictated reports.
@@ -28,6 +29,35 @@ export const PENDING_REVIEW = 'PENDING_REVIEW';
 /** Does this parse need a human before it reaches the map? */
 export function needsReview(parseConfidence: number): boolean {
   return parseConfidence < REVIEW_CONFIDENCE_FLOOR;
+}
+
+export interface VoiceGate {
+  status: 'ACTIVE' | typeof PENDING_REVIEW;
+  /** Null when the report is not dictated, or when nothing could be parsed. */
+  parseConfidence: number | null;
+}
+
+/**
+ * The single rule every write path applies to a dictated report, so a client
+ * cannot pick the lenient one. `report.create` and the offline `report.createMany`
+ * accept `source: 'VOICE'` as well, and a transcript the server cannot
+ * corroborate — including one it cannot parse at all, or a VOICE report that
+ * arrives with no transcript to check — is queued rather than published.
+ */
+export function voiceGate(
+  source: string,
+  transcript: string | null | undefined,
+  recognitionConfidence?: number | null,
+): VoiceGate {
+  if (source !== 'VOICE') return { status: 'ACTIVE', parseConfidence: null };
+
+  const parsed = transcript ? parseVoiceReport(transcript, recognitionConfidence) : null;
+  if (!parsed) return { status: PENDING_REVIEW, parseConfidence: null };
+
+  return {
+    status: needsReview(parsed.parseConfidence) ? PENDING_REVIEW : 'ACTIVE',
+    parseConfidence: parsed.parseConfidence,
+  };
 }
 
 /** Oldest first: a queued report is a runner still waiting for their report. */

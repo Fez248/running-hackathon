@@ -24,16 +24,26 @@ export const reviewRouter = createTRPCRouter({
     const cursor = input.after
       ? await ctx.prisma.report.findUnique({
           where: { id: input.after },
-          select: { createdAt: true },
+          select: { id: true, createdAt: true },
         })
       : null;
 
     const reports = await ctx.prisma.report.findMany({
       where: {
         status: PENDING_REVIEW,
-        ...(cursor ? { createdAt: { gt: cursor.createdAt } } : {}),
+        // `createdAt` alone is not unique — a run can queue two utterances in the
+        // same millisecond — so the cursor is (createdAt, id) and the page
+        // boundary keeps the timestamp's remaining peers eligible.
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { gt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+              ],
+            }
+          : {}),
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: input.limit,
       select: {
         id: true,
@@ -78,6 +88,14 @@ export const reviewRouter = createTRPCRouter({
   decide: protectedProcedure.input(reviewDecisionSchema).mutation(async ({ ctx, input }) => {
     const report = await ctx.prisma.report.findUnique({ where: { id: input.reportId } });
     if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
+    if (report.authorId && report.authorId === ctx.user.id) {
+      // Reviewing one's own dictation is not a second opinion, which is the
+      // whole point of the queue.
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'A dictated report has to be reviewed by someone other than its author.',
+      });
+    }
     if (report.status !== PENDING_REVIEW) {
       throw new TRPCError({
         code: 'CONFLICT',

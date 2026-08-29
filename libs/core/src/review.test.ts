@@ -7,6 +7,7 @@ import {
   reviewDecisionSchema,
   reviewedFields,
   reviewQueueSchema,
+  voiceGate,
 } from './review';
 
 const parseConfidence = (transcript: string, recognition?: number) => {
@@ -28,6 +29,34 @@ describe('needsReview', () => {
   it('is a floor, not a ceiling', () => {
     expect(needsReview(REVIEW_CONFIDENCE_FLOOR)).toBe(false);
     expect(needsReview(REVIEW_CONFIDENCE_FLOOR - 0.01)).toBe(true);
+  });
+});
+
+describe('voiceGate', () => {
+  it('leaves a manual report alone', () => {
+    expect(voiceGate('MANUAL', undefined)).toEqual({ status: 'ACTIVE', parseConfidence: null });
+  });
+
+  it('publishes a dictation the server can corroborate', () => {
+    expect(voiceGate('VOICE', 'steps here, impassable, twenty cm high')).toEqual({
+      status: 'ACTIVE',
+      parseConfidence: expect.any(Number),
+    });
+  });
+
+  it('queues a dictation submitted through the generic create path', () => {
+    // Same rule whichever procedure it arrives through, so a client cannot pick
+    // the lenient one by sending source: 'VOICE' to report.create.
+    expect(voiceGate('VOICE', 'kind of rough here', 0.3).status).toBe(PENDING_REVIEW);
+  });
+
+  it('queues a voice report the server cannot check at all', () => {
+    for (const transcript of [undefined, null, '', 'lovely weather today']) {
+      expect(voiceGate('VOICE', transcript)).toEqual({
+        status: PENDING_REVIEW,
+        parseConfidence: null,
+      });
+    }
   });
 });
 
