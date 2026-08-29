@@ -28,18 +28,12 @@ export function LocationConsentPanel({ permission, runActive }: LocationConsentP
       <h2>Location access</h2>
 
       <p className="muted">
-        A run only works with your position: the fog clears around where you actually go, and every
-        report — dictated or typed — is filed at your latest GPS fix.
+        Your position is what clears the fog and pins each obstacle to the right corner of the
+        street.
       </p>
-      <ul className="muted reasons">
-        <li>Clearing the Fog of War along your route.</li>
-        <li>Placing the obstacles you report at the right corner of the street.</li>
-        <li>Weighting a report’s confidence by the accuracy of the fix behind it.</li>
-      </ul>
       <p className="muted">
-        Tracking only runs between <strong>Start run</strong> and <strong>Stop run</strong>. Nothing
-        is sent while you are just looking at the map, and this permission check throws its own fix
-        away.
+        Tracking only runs between <strong>Start Exploring</strong> and <strong>Finish</strong> —
+        nothing is sent while you are just looking at the map.
       </p>
 
       <p className="muted" role="status">
@@ -78,8 +72,8 @@ export function LocationConsentPanel({ permission, runActive }: LocationConsentP
             </button>
           </div>
           <p className="muted">
-            Prefer not to share location? Reports can still be typed, but they need a live run, so
-            the map stays read-only until access is granted.
+            Prefer not to share location? You can still browse the map, but mapping obstacles needs
+            your position.
           </p>
         </>
       ) : null}

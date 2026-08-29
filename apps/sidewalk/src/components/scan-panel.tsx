@@ -79,12 +79,12 @@ export function ScanPanel() {
   const result = ingest.data;
 
   return (
-    <div className="card">
-      <h2>Import bridge scan</h2>
+    <details className="card">
+      <summary>Import a phone scan</summary>
       <p className="muted">
-        Walk a street with the phone recording, run{' '}
-        <code>python -m bridge.cli scan &lt;recording&gt; --format map --out scan.json</code>, then
-        upload the file: each floor imperfection becomes a rough-surface report.
+        Upload a scan exported with{' '}
+        <code>python -m bridge.cli scan &lt;recording&gt; --format map --out scan.json</code> — each
+        finding becomes a rough-surface obstacle.
       </p>
 
       <label htmlFor="scan-file">Scan payload (JSON)</label>
@@ -189,6 +189,6 @@ export function ScanPanel() {
           ))}
         </>
       ) : null}
-    </div>
+    </details>
   );
 }

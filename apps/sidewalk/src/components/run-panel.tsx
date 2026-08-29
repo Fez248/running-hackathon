@@ -87,16 +87,16 @@ export function RunPanel({
 
   return (
     <div className="card">
-      <h2>Fog of War run</h2>
+      <h2>Clear the Fog</h2>
       <p className="muted">
-        Precise GPS clears the fog around your path; dictate what you pass and it lands on the map
-        at your current position.
+        Move and the fog lifts around you. Say or type what you pass — it lands on the map where you
+        are.
       </p>
 
       <div className="row">
         {status.active ? (
           <button type="button" onClick={onStop}>
-            Stop run
+            Finish
           </button>
         ) : (
           <button
@@ -108,8 +108,8 @@ export function RunPanel({
             {locationRequesting
               ? 'Waiting for location access…'
               : locationState === 'granted'
-                ? 'Start run'
-                : 'Start run (asks for location)'}
+                ? 'Start Exploring'
+                : 'Start Exploring (asks for location)'}
           </button>
         )}
         <span className="badge" data-gps={status.quality} role="status">
@@ -127,9 +127,7 @@ export function RunPanel({
           : ''}
       </p>
       {locationBlocked && !status.active ? (
-        <p className="muted">
-          Location access is off, so a run cannot start — see the location panel above.
-        </p>
+        <p className="muted">Location access is off — see the panel above to turn it on.</p>
       ) : null}
       {status.error ? (
         <p className="error" role="alert">
@@ -148,7 +146,7 @@ export function RunPanel({
           checked={fogEnabled}
           onChange={(event) => onToggleFog(event.target.checked)}
         />
-        Show Fog of War overlay
+        Show the fog
       </label>
       <label className="toggle">
         <input
@@ -156,7 +154,7 @@ export function RunPanel({
           checked={follow}
           onChange={(event) => onToggleFollow(event.target.checked)}
         />
-        Keep the map centred on me
+        Follow me on the map
       </label>
       <label className="toggle">
         <input
@@ -165,7 +163,7 @@ export function RunPanel({
           disabled={!voice.supported || !status.active || micBlocked || voice.starting}
           onChange={(event) => void onToggleVoice(event.target.checked)}
         />
-        Ambient voice reporting {voiceStateLabel}
+        Report by voice {voiceStateLabel}
       </label>
 
       {voice.listening ? (
@@ -188,8 +186,8 @@ export function RunPanel({
           : micBlocked
             ? 'Dictation needs the microphone. Chrome: click the icon left of the address bar → Site settings → Microphone → Allow, then re-check below.'
             : status.active
-              ? 'Audio is only captured while this is on, and the microphone is released the moment you switch it off. Recognition runs in your browser’s speech service; only the transcript and your coordinate are stored.'
-              : 'Start a run to dictate reports — an utterance is placed at your latest accepted GPS fix.'}
+              ? 'Audio is captured only while this is on; the microphone is released the moment you switch it off. Only the transcript and your coordinate are stored.'
+              : 'Start exploring to report by voice — each phrase lands at your latest GPS fix.'}
       </p>
       {voice.interim ? <p className="interim">“{voice.interim}”</p> : null}
       {voice.error ? (
@@ -217,7 +215,7 @@ export function RunPanel({
       >
         <input
           aria-label="Type a report"
-          placeholder={status.active ? 'e.g. high curb about 15 cm' : 'Start a run to log a report here'}
+          placeholder={status.active ? 'e.g. high curb about 15 cm' : 'Start exploring to log here'}
           value={typed}
           disabled={!status.active}
           onChange={(event) => setTyped(event.target.value)}
@@ -229,7 +227,7 @@ export function RunPanel({
 
       {voice.utterances.length ? (
         <div className="utterances">
-          <h3>Logged this run</h3>
+          <h3>Logged so far</h3>
           {voice.utterances.map((utterance) => (
             <div className="report" key={utterance.id}>
               <div>“{utterance.transcript}”</div>

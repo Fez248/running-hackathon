@@ -7,7 +7,7 @@ export function StatsPanel() {
 
   return (
     <div className="card">
-      <h2>Coverage</h2>
+      <h2>City progress</h2>
       {stats.error ? (
         <p className="error" role="alert">
           {stats.error.message}
@@ -16,8 +16,8 @@ export function StatsPanel() {
       {stats.data ? (
         <>
           <p className="muted">
-            {stats.data.reports} active reports · {(stats.data.surveyedMeters / 1000).toFixed(1)} km
-            surveyed across {stats.data.traceCount} traces
+            {stats.data.reports} obstacles mapped · {(stats.data.surveyedMeters / 1000).toFixed(1)}{' '}
+            km cleared across {stats.data.traceCount} routes
           </p>
           {stats.data.topContributors.length ? (
             <>
@@ -31,7 +31,7 @@ export function StatsPanel() {
           ) : null}
         </>
       ) : stats.error ? null : (
-        <p className="muted">Loading coverage…</p>
+        <p className="muted">Loading…</p>
       )}
     </div>
   );
