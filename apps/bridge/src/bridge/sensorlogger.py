@@ -370,7 +370,10 @@ class SidewalkClient:
         )
         try:
             with self._opener(request, timeout=self._config.timeout_s) as response:
-                raw = response.read().decode("utf-8") or "{}"
+                try:
+                    raw = response.read().decode("utf-8") or "{}"
+                except UnicodeDecodeError:
+                    raise SyncError(f"{path} returned invalid UTF-8") from None
         except urllib.error.HTTPError as exc:
             raise SyncError(f"{path} failed: HTTP {exc.code}") from None
         except urllib.error.URLError as exc:

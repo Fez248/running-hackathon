@@ -365,6 +365,15 @@ def test_a_malformed_response_is_a_sync_error_not_a_crash():
         SidewalkClient(_config(), opener=Garbage()).claim()
 
 
+def test_a_non_utf8_response_is_a_sync_error_not_a_crash():
+    class Binary(FakeHttp):
+        def __call__(self, request, timeout=None):  # noqa: ANN001
+            return FakeResponse(b"\xff\xfe\x00garbage")
+
+    with pytest.raises(SyncError, match="invalid UTF-8"):
+        SidewalkClient(_config(), opener=Binary()).claim()
+
+
 def test_a_completion_outage_does_not_abandon_the_rest_of_the_batch(tmp_path):
     class NoCompletions(FakeHttp):
         def __call__(self, request, timeout=None):  # noqa: ANN001
