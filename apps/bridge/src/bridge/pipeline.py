@@ -21,9 +21,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from imukit.cadence import detect_footfalls, estimate_step_frequency, stride_segments
+from imukit.cadence import CadenceEstimate, detect_footfalls, resolve_step_frequency, stride_segments
 from imukit.features import window_features
-from imukit.geo import distance_at_times
+from imukit.geo import distance_at_times, median_speed_mps
 from imukit.preprocess import bandpass, gravity_split, resample_uniform
 from imukit.types import GpsTrack, ImuTrace
 
@@ -42,6 +42,8 @@ class ProcessedPass:
     window_distance_m: np.ndarray
     features: dict[str, np.ndarray]
     template: np.ndarray
+    #: The step frequency and the cross-checks that settled it.
+    cadence: CadenceEstimate | None = None
 
     @property
     def n_windows(self) -> int:
@@ -111,7 +113,13 @@ def process_pass(
     uniform = ImuTrace(t=t, accel=accel, fs=fs_target, meta=dict(trace.meta))
     vert, _horiz = gravity_split(uniform)
 
-    f_step = estimate_step_frequency(vert, fs_target)
+    # Ground speed is what makes the step/stride ambiguity decidable, so the
+    # cadence estimate is given the GPS before the stride model is built on it.
+    speed = median_speed_mps(gps) if gps is not None and gps.t.size >= 3 else None
+    if not speed:
+        speed = float(trace.meta.get("speed_mps", 0.0)) or None
+    cadence = resolve_step_frequency(vert, fs_target, speed_mps=speed)
+    f_step = cadence.f_step
     footfalls = detect_footfalls(vert, fs_target, f_step=f_step)
     segments = stride_segments(footfalls, len(vert))
     residual, tmpl = suppress_cadence(vert, segments)
@@ -145,4 +153,5 @@ def process_pass(
         window_distance_m=np.asarray(wd, dtype=float),
         features={k: np.asarray(v, dtype=float) for k, v in feats.items()},
         template=tmpl,
+        cadence=cadence,
     )

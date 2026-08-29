@@ -22,12 +22,44 @@ On the phone, any logger that writes CSV at ≥100 Hz works. Verified layouts:
 | App | Files to export | Notes |
 | --- | --- | --- |
 | Sensor Logger (iOS/Android) | `TotalAcceleration.csv` + `Location.csv` | set the accelerometer to 200 Hz, enable Location; export "Zip of CSVs" |
+| Sensor Logger, raw zip | whole export | `AccelerometerUncalibrated.csv` is in **g**; ingest detects the scale and normalises it, so a raw zip scans unrepaired |
 | phyphox (iOS/Android) | `Accelerometer.csv` + `Location.csv` | "Acceleration with g" experiment, not "Linear Acceleration" |
 | anything else | `t,ax,ay,az` CSV + optional `t,lat,lon[,accuracy_m]` CSV | pass the GPS file with `--gps` |
 
 **Use the accelerometer stream that still contains gravity.** A
 linear-acceleration / user-acceleration stream is rejected: the vertical
 projection is what makes the result independent of how the phone is carried.
+Where the export also has a `Gravity.csv`, ingest reconstructs the total as
+accelerometer + gravity rather than rejecting the pass.
+
+**Enable Accelerometer and Location only.** Measured on an iPhone 12 Pro Max:
+asking Sensor Logger for a 5 ms interval with nine sensors enabled delivered
+**99.95 Hz**, not 200 Hz — the phone accepts the interval and then quietly
+misses it, which costs half the shock band and is invisible until the pass is
+scanned. Every other stream (gyroscope, magnetometer, barometer, pedometer,
+microphone) is spent for nothing: the scan reads acceleration and position.
+
+## 1a. Check the capture before walking away
+
+```bash
+python -m bridge.cli doctor ~/Downloads/2026-08-29_run.zip
+```
+
+`doctor` reads a recording and prints the *recorder settings* to change:
+requested vs measured sample rate, whether the accelerometer carries gravity,
+the GPS accuracy distribution with the fraction of fixes over 5 m, duration,
+dropouts, and how many sensors were enabled. Run it on the first pass of a
+session, before the walk home — every unusable recording so far cost a second
+trip outside to discover.
+
+### GPS accuracy is the binding constraint
+
+Medians across five real passes (Queen Elizabeth Olympic Park, London Stadium):
+16.9, 4.70, 5.02, 6.34, 4.44 m. None reached the 3 m goal. The gate is not
+loosened for this; instead every finding carries a positional uncertainty
+(`uncertainty_m`, from the local fix accuracy and the extent of the finding
+along the path) and the map draws it as a radius. A finding at ±5 m stated as
+±5 m is useful; the same finding drawn as a pin is a lie.
 
 ## 2. Recording a pass
 

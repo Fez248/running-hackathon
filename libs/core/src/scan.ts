@@ -67,6 +67,14 @@ export const sensorFindingSchema = z.object({
   confidence: z.number().min(0).max(1),
   lat: latitudeSchema,
   lng: longitudeSchema,
+  /**
+   * 1-sigma radius in metres within which the finding actually sits: the GPS
+   * accuracy local to that point of the route combined with the along-path
+   * extent of the detection. A finding at ±5 m stated as ±5 m is useful; the
+   * same finding drawn as a pin is a lie, so this travels to the map and is
+   * what a marker's radius is drawn from.
+   */
+  uncertaintyM: z.number().min(0).max(1_000).nullish(),
 });
 export type SensorFinding = z.infer<typeof sensorFindingSchema>;
 
@@ -81,6 +89,29 @@ export function scanSourceLabel(source: string): string {
   return name || 'recording';
 }
 
+/**
+ * How the recording was made. A finding that cannot be traced back to the
+ * capture settings that produced it cannot be argued with, so the scan carries
+ * enough to re-derive it: which app on which phone, the rate asked for against
+ * the rate delivered, the unit scale applied at ingest, and the detector
+ * threshold the findings came out of.
+ */
+export const scanProvenanceSchema = z.object({
+  recorderApp: z.string().max(80).nullish(),
+  recorderVersion: z.string().max(40).nullish(),
+  deviceModel: z.string().max(80).nullish(),
+  platform: z.string().max(40).nullish(),
+  /** Sample rate asked of the recorder app, in Hz. */
+  requestedFsHz: z.number().min(0).max(10_000).nullish(),
+  /** Sample rate the export actually delivered, in Hz. */
+  measuredFsHz: z.number().min(0).max(10_000).nullish(),
+  /** Factor applied to reach m/s²: 1 for an m/s² stream, ~9.81 for a stream in g. */
+  unitScale: z.number().min(0).max(100).default(1),
+  /** Robust-z threshold the detector ran at. */
+  detectorThreshold: z.number().min(0).max(100).nullish(),
+});
+export type ScanProvenance = z.infer<typeof scanProvenanceSchema>;
+
 export const scanIngestSchema = z.object({
   /** Recording the findings came from; kept as a bare name, never a path. */
   source: z.string().min(1).max(200).transform(scanSourceLabel),
@@ -88,6 +119,8 @@ export const scanIngestSchema = z.object({
   format: z.string().min(1).max(40),
   quality: captureQualitySchema,
   cadenceSpm: z.number().min(0).max(400),
+  /** Capture settings, absent for a payload from an older bridge build. */
+  provenance: scanProvenanceSchema.nullish(),
   /**
    * A finding's index is its identity within the scan, so two findings may not
    * share one: their reports would be the same report, and the second would
@@ -150,7 +183,10 @@ export function sensorFindingToReport(
   finding: SensorFinding,
   scan: Pick<ScanIngestInput, 'clientScanId' | 'quality'>,
 ): SensorReportDraft {
-  const accuracyM = scan.quality.gpsAccuracyM ?? null;
+  // The finding's own positional uncertainty when the detector supplied one: it
+  // already contains the local GPS accuracy and adds the detection's along-path
+  // extent, so it is never the more flattering of the two numbers.
+  const accuracyM = finding.uncertaintyM ?? scan.quality.gpsAccuracyM ?? null;
   const extent = `${finding.startM.toFixed(1)}–${finding.endM.toFixed(1)} m along the route`;
   const note = `${finding.description ? `${finding.description}; ` : ''}${extent}`.slice(0, 280);
 

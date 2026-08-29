@@ -8,6 +8,10 @@ from .types import GpsTrack
 
 EARTH_R = 6371008.8
 
+# No phone fix is better than this, and a reported 0 m would otherwise take the
+# whole weight of a window.
+MIN_FIX_SIGMA_M = 1.0
+
 
 def haversine_m(lat1, lon1, lat2, lon2) -> np.ndarray:
     p1, p2 = np.radians(lat1), np.radians(lat2)
@@ -17,13 +21,29 @@ def haversine_m(lat1, lon1, lat2, lon2) -> np.ndarray:
     return 2 * EARTH_R * np.arcsin(np.sqrt(a))
 
 
+def fix_weights(track: GpsTrack) -> np.ndarray:
+    """Per-fix weight from the fix's own reported accuracy, ``1 / sigma^2``.
+
+    A real track mixes 3.5 m fixes with 34 m outliers in the same pass, and an
+    unweighted mean lets the outlier drag the route by metres. Inverse-variance
+    weighting is the right amount of distrust: the 34 m fix counts for ~1% of
+    the 3.5 m one instead of the same.
+    """
+    if track.accuracy_m is None or track.accuracy_m.size != track.t.size:
+        return np.ones(track.t.size)
+    sigma = np.asarray(track.accuracy_m, dtype=float)
+    sigma = np.where(np.isfinite(sigma) & (sigma > MIN_FIX_SIGMA_M), sigma, MIN_FIX_SIGMA_M)
+    return 1.0 / sigma**2
+
+
 def smooth_track(track: GpsTrack, window_s: float = 5.0) -> GpsTrack:
-    """Moving-average the fix positions before any distance computation.
+    """Accuracy-weighted moving average of the fix positions.
 
     Summing raw fix-to-fix haversine distances integrates positional noise as a
     random walk and grossly over-estimates path length (with 3 m 1 Hz fixes the
     error is tens of percent), which would smear every window onto the wrong
-    place along the route.
+    place along the route. Each fix enters the average weighted by
+    :func:`fix_weights`, so a momentary loss of lock moves the route by little.
     """
     if track.t.size < 3 or window_s <= 0:
         return track
@@ -31,12 +51,19 @@ def smooth_track(track: GpsTrack, window_s: float = 5.0) -> GpsTrack:
     n = max(1, int(round(window_s / max(dt, 1e-6))))
     if n <= 1:
         return track
-    kernel = np.ones(n) / n
+    kernel = np.ones(n)
     pad = n // 2
+    w = fix_weights(track)
 
-    def _smooth(x: np.ndarray) -> np.ndarray:
+    def _box(x: np.ndarray) -> np.ndarray:
         xp = np.pad(x, (pad, pad), mode="edge")
         return np.convolve(xp, kernel, mode="same")[pad : pad + x.size]
+
+    norm = _box(w)
+    norm = np.where(norm > 0, norm, 1.0)
+
+    def _smooth(x: np.ndarray) -> np.ndarray:
+        return _box(w * x) / norm
 
     return GpsTrack(t=track.t, lat=_smooth(track.lat), lon=_smooth(track.lon), accuracy_m=track.accuracy_m)
 
@@ -57,6 +84,27 @@ def distance_at_times(track: GpsTrack, t: np.ndarray, smooth_s: float = 5.0) -> 
     return np.interp(np.asarray(t, dtype=float), track.t, d)
 
 
+def median_speed_mps(track: GpsTrack, smooth_s: float = 5.0, window_s: float = 10.0) -> float:
+    """Median ground speed over the pass, in m/s.
+
+    Taken from the smoothed along-path distance over ``window_s`` blocks rather
+    than fix to fix: at 1 Hz the fix-to-fix difference is mostly positional
+    noise, and it is the median over blocks that survives a stop at a crossing.
+    Returns 0.0 when the track is too short to say anything.
+    """
+    if track.t.size < 3:
+        return 0.0
+    d = cumulative_distance(track, smooth_s=smooth_s)
+    dt = float(np.median(np.diff(track.t)))
+    n = max(1, int(round(window_s / max(dt, 1e-6))))
+    if d.size <= n:
+        span = float(track.t[-1] - track.t[0])
+        return float(d[-1] / span) if span > 0 else 0.0
+    speeds = (d[n:] - d[:-n]) / (track.t[n:] - track.t[:-n])
+    speeds = speeds[np.isfinite(speeds)]
+    return float(np.median(speeds)) if speeds.size else 0.0
+
+
 def position_at_distance(track: GpsTrack, distance_m, smooth_s: float = 5.0):
     """Inverse of :func:`cumulative_distance`: along-path metres -> (lat, lon).
 
@@ -67,6 +115,36 @@ def position_at_distance(track: GpsTrack, distance_m, smooth_s: float = 5.0):
     d = cumulative_distance(track, smooth_s=smooth_s)
     q = np.asarray(distance_m, dtype=float)
     return np.interp(q, d, smoothed.lat), np.interp(q, d, smoothed.lon)
+
+
+def accuracy_at_distance(track: GpsTrack, distance_m, smooth_s: float = 5.0) -> np.ndarray:
+    """Effective positional sigma (m) of the track at given along-path metres.
+
+    The along-path smoothing averages roughly a window of fixes, so the sigma at
+    a point comes from the local fixes rather than from any single one. The
+    window is averaged, not accumulated: consecutive GPS errors are strongly
+    correlated over seconds, so five fixes do not buy a ``sqrt(5)`` improvement
+    and claiming one would be exactly the false precision this is here to avoid.
+    Returns ``nan`` where the track reports no accuracy at all.
+    """
+    q = np.asarray(distance_m, dtype=float)
+    if track.accuracy_m is None or track.t.size == 0:
+        return np.full(q.shape, np.nan)
+    d = cumulative_distance(track, smooth_s=smooth_s)
+    sigma = np.asarray(track.accuracy_m, dtype=float)
+    sigma = np.where(np.isfinite(sigma) & (sigma > MIN_FIX_SIGMA_M), sigma, MIN_FIX_SIGMA_M)
+    if d.size < 2:
+        return np.full(q.shape, float(sigma[0]))
+    dt = float(np.median(np.diff(track.t))) if track.t.size > 1 else 0.0
+    n = max(1, int(round(smooth_s / max(dt, 1e-6)))) if smooth_s > 0 else 1
+    # Mean inverse variance over the smoothing window, per fix, interpolated onto
+    # the query distances.
+    inv = 1.0 / sigma**2
+    pad = n // 2
+    padded = np.pad(inv, (pad, pad), mode="edge")
+    local = np.convolve(padded, np.ones(n) / n, mode="same")[pad : pad + inv.size]
+    combined = 1.0 / np.sqrt(np.where(local > 0, local, 1.0 / MIN_FIX_SIGMA_M**2))
+    return np.interp(q, d, combined)
 
 
 def bin_index(distance_m: np.ndarray, bin_size_m: float) -> np.ndarray:

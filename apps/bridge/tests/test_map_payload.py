@@ -44,6 +44,17 @@ FINDING_KEYS = {
     "confidence",
     "lat",
     "lng",
+    "uncertaintyM",
+}
+PROVENANCE_KEYS = {
+    "recorderApp",
+    "recorderVersion",
+    "deviceModel",
+    "platform",
+    "requestedFsHz",
+    "measuredFsHz",
+    "unitScale",
+    "detectorThreshold",
 }
 
 
@@ -58,8 +69,17 @@ def test_map_payload_uses_the_map_field_names(tmp_path):
     result, _pp = scan_recording(_good_recording(tmp_path))
     payload = to_map_payload(result)
 
-    assert set(payload) == {"source", "format", "quality", "cadenceSpm", "findings", "clientScanId"}
+    assert set(payload) == {
+        "source",
+        "format",
+        "quality",
+        "cadenceSpm",
+        "provenance",
+        "findings",
+        "clientScanId",
+    }
     assert set(payload["quality"]) == QUALITY_KEYS
+    assert set(payload["provenance"]) == PROVENANCE_KEYS
     assert payload["quality"]["verdict"] == "ok"
     assert payload["findings"], "expected findings on the seeded anomalous route"
     for finding in payload["findings"]:

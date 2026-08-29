@@ -18,10 +18,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
-from imukit.geo import position_at_distance
+from imukit.cadence import CadenceEstimate
+from imukit.geo import accuracy_at_distance, position_at_distance
 
 from .detect import detect_single_pass
-from .ingest import Recording
+from .ingest import Provenance, Recording
 from .pipeline import ProcessedPass, process_pass
 from .quality import MIN_FS_HZ, CaptureQuality, assess
 
@@ -32,6 +33,11 @@ DIRECTION_LABELS = {
     "attenuation": ("compliant_or_absorbing", "soft/absorbing: mat, gravel, wet or deformable patch"),
 }
 CONFIDENCE_BY_VERDICT = {"ok": 1.0, "degraded": 0.6, "unusable": 0.0}
+
+# Positional uncertainty when the track reports no accuracy at all. A phone in a
+# city rarely does better than this, so it is the honest stand-in for "unknown"
+# — quietly assuming a metre would turn an unknown into a claim.
+DEFAULT_FIX_SIGMA_M = 10.0
 
 
 @dataclass
@@ -48,6 +54,8 @@ class Finding:
     confidence: float
     lat: float | None = None
     lon: float | None = None
+    #: 1-sigma radius, in metres, within which the finding actually sits.
+    uncertainty_m: float | None = None
 
 
 @dataclass
@@ -60,6 +68,11 @@ class ScanResult:
     n_footfalls: int
     findings: list[Finding]
     notes: list[str] = field(default_factory=list)
+    #: Evidence that the cadence is the step rate rather than the stride rate.
+    cadence: CadenceEstimate | None = None
+    provenance: Provenance = field(default_factory=Provenance)
+    #: Robust-z threshold the detector ran at, part of what makes a finding arguable.
+    threshold: float = 3.0
 
     def as_dict(self) -> dict:
         return {
@@ -71,6 +84,8 @@ class ScanResult:
             "n_footfalls": self.n_footfalls,
             "findings": [asdict(f) for f in self.findings],
             "notes": self.notes,
+            "cadence_check": None if self.cadence is None else self.cadence.as_dict(),
+            "provenance": {**self.provenance.as_dict(), "detector_threshold": self.threshold},
         }
 
 
@@ -93,6 +108,8 @@ def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, 
                 n_footfalls=0,
                 findings=[],
                 notes=notes,
+                provenance=rec.provenance,
+                threshold=threshold,
             ),
             None,
         )
@@ -112,10 +129,11 @@ def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, 
         kind, description = DIRECTION_LABELS[d.direction]
         # A z of `threshold` is the weakest thing we report; saturate at 2x.
         strength = min(1.0, (abs(d.score) - threshold) / threshold + 0.5)
-        lat = lon = None
+        lat = lon = uncertainty = None
         if rec.gps is not None and rec.gps.t.size >= 2:
             la, lo = position_at_distance(rec.gps, np.array([d.peak_m]))
             lat, lon = float(la[0]), float(lo[0])
+            uncertainty = positional_uncertainty(rec, d.peak_m, d.end_m - d.start_m)
         findings.append(
             Finding(
                 index=i,
@@ -128,6 +146,7 @@ def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, 
                 confidence=round(base_conf * strength, 2),
                 lat=lat,
                 lon=lon,
+                uncertainty_m=None if uncertainty is None else round(uncertainty, 1),
             )
         )
     if not findings:
@@ -142,9 +161,30 @@ def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, 
             n_footfalls=int(pp.footfalls.size),
             findings=findings,
             notes=notes,
+            cadence=pp.cadence,
+            provenance=rec.provenance,
+            threshold=threshold,
         ),
         pp,
     )
+
+
+def positional_uncertainty(rec: Recording, peak_m: float, extent_m: float) -> float:
+    """1-sigma radius, in metres, of where a finding really is.
+
+    Two independent terms in quadrature: the GPS accuracy local to that point of
+    the route, and the along-path extent of the detection itself — the detector
+    says a stretch of pavement rattles, not a point, so half its extent is a
+    real positional spread and not an error to be hidden. Stating +-5 m is
+    useful; drawing the same finding as a pin is a lie.
+    """
+    sigma = np.nan
+    if rec.gps is not None:
+        sigma = float(accuracy_at_distance(rec.gps, np.array([float(peak_m)]))[0])
+    if not np.isfinite(sigma):
+        sigma = DEFAULT_FIX_SIGMA_M
+    half_extent = max(0.0, float(extent_m)) / 2.0
+    return float(np.hypot(sigma, half_extent))
 
 
 def to_geojson(result: ScanResult) -> dict:
@@ -160,6 +200,7 @@ def to_geojson(result: ScanResult) -> dict:
                 "extent_m": [f.start_m, f.end_m],
                 "score": f.score,
                 "confidence": f.confidence,
+                "uncertainty_m": f.uncertainty_m,
             },
         }
         for f in result.findings
@@ -206,6 +247,7 @@ def to_map_payload(result: ScanResult, client_scan_id: str | None = None) -> dic
     an upload does not publish the home directory it was scanned from.
     """
     q = result.quality
+    p = result.provenance
     return {
         "source": source_label(result.source),
         "format": result.format,
@@ -224,6 +266,16 @@ def to_map_payload(result: ScanResult, client_scan_id: str | None = None) -> dic
             "warnings": list(q.warnings),
         },
         "cadenceSpm": result.cadence_spm,
+        "provenance": {
+            "recorderApp": p.recorder_app,
+            "recorderVersion": p.recorder_version,
+            "deviceModel": p.device_model,
+            "platform": p.platform,
+            "requestedFsHz": p.requested_fs_hz,
+            "measuredFsHz": p.measured_fs_hz,
+            "unitScale": p.unit_scale,
+            "detectorThreshold": result.threshold,
+        },
         "findings": [
             {
                 "index": f.index,
@@ -236,6 +288,7 @@ def to_map_payload(result: ScanResult, client_scan_id: str | None = None) -> dic
                 "confidence": f.confidence,
                 "lat": f.lat,
                 "lng": f.lon,
+                "uncertaintyM": f.uncertainty_m,
             }
             for f in result.findings
             if f.lat is not None and f.lon is not None
@@ -245,10 +298,11 @@ def to_map_payload(result: ScanResult, client_scan_id: str | None = None) -> dic
 
 
 def to_csv(result: ScanResult) -> str:
-    header = "index,kind,start_m,end_m,peak_m,score,confidence,lat,lon"
+    header = "index,kind,start_m,end_m,peak_m,score,confidence,lat,lon,uncertainty_m"
     rows = [
         f"{f.index},{f.kind},{f.start_m},{f.end_m},{f.peak_m},{f.score},{f.confidence},"
-        f"{'' if f.lat is None else f'{f.lat:.7f}'},{'' if f.lon is None else f'{f.lon:.7f}'}"
+        f"{'' if f.lat is None else f'{f.lat:.7f}'},{'' if f.lon is None else f'{f.lon:.7f}'},"
+        f"{'' if f.uncertainty_m is None else f'{f.uncertainty_m:.1f}'}"
         for f in result.findings
     ]
     return "\n".join([header, *rows]) + "\n"
@@ -267,6 +321,27 @@ def write_output(result: ScanResult, path: Path, fmt: str, client_scan_id: str |
     else:
         raise ValueError(f"unknown output format {fmt!r}")
     return path
+
+
+def _cadence_lines(cadence: CadenceEstimate | None) -> list[str]:
+    """The cadence cross-check, so a halved cadence is visible instead of implicit."""
+    if cadence is None:
+        return []
+    checks = [f"decided by {cadence.basis}"]
+    if cadence.step_length_m is not None and cadence.speed_mps is not None:
+        checks.append(f"{cadence.step_length_m:.2f} m per step at {cadence.speed_mps:.2f} m/s")
+    if cadence.f_footfall is not None:
+        checks.append(f"footfall intervals {cadence.f_footfall * 60:.0f} spm")
+    if cadence.asymmetry is not None:
+        checks.append(f"L/R asymmetry {cadence.asymmetry:.0%}")
+    lines = [f"cadence check {', '.join(checks)}"]
+    if cadence.corrected:
+        lines.append(
+            f"  ~ spectral fundamental was {cadence.f_spectral * 60:.0f} spm (the stride); "
+            f"doubled to {cadence.spm:.0f} spm"
+        )
+    lines += [f"  ~ {note}" for note in cadence.notes if not cadence.corrected]
+    return lines
 
 
 def format_report(result: ScanResult) -> str:
@@ -291,9 +366,12 @@ def format_report(result: ScanResult) -> str:
             f"gait          {result.cadence_spm:.0f} spm, "
             f"{result.n_footfalls} footfalls, {result.n_windows} windows"
         )
+        lines += _cadence_lines(result.cadence)
         lines.append(f"findings      {len(result.findings)}")
         for f in result.findings:
             where = f" @ {f.lat:.6f},{f.lon:.6f}" if f.lat is not None else ""
+            if f.uncertainty_m is not None:
+                where += f" \u00b1{f.uncertainty_m:.0f} m"
             lines.append(
                 f"  #{f.index} {f.kind:26s} {f.start_m:7.1f}-{f.end_m:7.1f} m "
                 f"peak {f.peak_m:7.1f} m  z={f.score:5.2f}  conf={f.confidence:.2f}{where}"
