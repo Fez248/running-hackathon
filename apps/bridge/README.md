@@ -33,6 +33,7 @@ cd apps/bridge
 pip install -e ../../libs/imukit -e '.[dev]'   # or: PYTHONPATH=src:../../libs/imukit/src
 python -m pytest -q
 python -m bridge.cli scan --demo     # end-to-end on a generated recording
+python -m bridge.cli doctor <rec>    # capture settings to change before the next pass
 python -m bridge.cli demo            # one simulated pass + detections
 python -m bridge.cli run all         # E1-E6, writes docs/results/results.json
 python -m bridge.cli plot            # docs/results/single_pass_scores.png
@@ -55,6 +56,9 @@ cd apps/bridge
 
 # No hardware? Generate a Sensor Logger shaped recording and scan it end to end.
 python -m bridge.cli scan --demo
+
+# Before walking home: what to change about the recorder's settings.
+python -m bridge.cli doctor ~/Downloads/2026-08-29_run.zip
 
 # A real recording: an export directory, a .zip of one, or a bare CSV + GPS CSV.
 python -m bridge.cli scan ~/Downloads/2026-08-29_run

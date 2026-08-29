@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
+from imukit.cadence import CadenceEstimate
 from imukit.geo import accuracy_at_distance, position_at_distance
 
 from .detect import detect_single_pass
@@ -67,6 +68,8 @@ class ScanResult:
     n_footfalls: int
     findings: list[Finding]
     notes: list[str] = field(default_factory=list)
+    #: Evidence that the cadence is the step rate rather than the stride rate.
+    cadence: CadenceEstimate | None = None
     provenance: Provenance = field(default_factory=Provenance)
     #: Robust-z threshold the detector ran at, part of what makes a finding arguable.
     threshold: float = 3.0
@@ -81,6 +84,7 @@ class ScanResult:
             "n_footfalls": self.n_footfalls,
             "findings": [asdict(f) for f in self.findings],
             "notes": self.notes,
+            "cadence_check": None if self.cadence is None else self.cadence.as_dict(),
             "provenance": {**self.provenance.as_dict(), "detector_threshold": self.threshold},
         }
 
@@ -157,6 +161,7 @@ def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, 
             n_footfalls=int(pp.footfalls.size),
             findings=findings,
             notes=notes,
+            cadence=pp.cadence,
             provenance=rec.provenance,
             threshold=threshold,
         ),
@@ -318,6 +323,27 @@ def write_output(result: ScanResult, path: Path, fmt: str, client_scan_id: str |
     return path
 
 
+def _cadence_lines(cadence: CadenceEstimate | None) -> list[str]:
+    """The cadence cross-check, so a halved cadence is visible instead of implicit."""
+    if cadence is None:
+        return []
+    checks = [f"decided by {cadence.basis}"]
+    if cadence.step_length_m is not None and cadence.speed_mps is not None:
+        checks.append(f"{cadence.step_length_m:.2f} m per step at {cadence.speed_mps:.2f} m/s")
+    if cadence.f_footfall is not None:
+        checks.append(f"footfall intervals {cadence.f_footfall * 60:.0f} spm")
+    if cadence.asymmetry is not None:
+        checks.append(f"L/R asymmetry {cadence.asymmetry:.0%}")
+    lines = [f"cadence check {', '.join(checks)}"]
+    if cadence.corrected:
+        lines.append(
+            f"  ~ spectral fundamental was {cadence.f_spectral * 60:.0f} spm (the stride); "
+            f"doubled to {cadence.spm:.0f} spm"
+        )
+    lines += [f"  ~ {note}" for note in cadence.notes if not cadence.corrected]
+    return lines
+
+
 def format_report(result: ScanResult) -> str:
     """Human-readable summary printed by ``bridge scan``."""
     q = result.quality
@@ -340,9 +366,12 @@ def format_report(result: ScanResult) -> str:
             f"gait          {result.cadence_spm:.0f} spm, "
             f"{result.n_footfalls} footfalls, {result.n_windows} windows"
         )
+        lines += _cadence_lines(result.cadence)
         lines.append(f"findings      {len(result.findings)}")
         for f in result.findings:
             where = f" @ {f.lat:.6f},{f.lon:.6f}" if f.lat is not None else ""
+            if f.uncertainty_m is not None:
+                where += f" \u00b1{f.uncertainty_m:.0f} m"
             lines.append(
                 f"  #{f.index} {f.kind:26s} {f.start_m:7.1f}-{f.end_m:7.1f} m "
                 f"peak {f.peak_m:7.1f} m  z={f.score:5.2f}  conf={f.confidence:.2f}{where}"

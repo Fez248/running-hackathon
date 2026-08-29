@@ -10,7 +10,9 @@ from typing import Any
 
 import numpy as np
 
+from .console import echo
 from .detect import detect_single_pass, score_pass
+from .doctor import diagnose, format_diagnosis
 from .evaluate import evaluate_detections
 from .experiments import ALL_EXPERIMENTS, ROUTE_ANOMALIES, run_all
 from .ingest import load_recording, write_export_dir
@@ -30,7 +32,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         run_all(out)
         return 0
     res = ALL_EXPERIMENTS[args.experiment]()
-    print(json.dumps({res.name: res.summary}, indent=2, default=str))
+    echo(json.dumps({res.name: res.summary}, indent=2, default=str))
     return 0
 
 
@@ -40,14 +42,14 @@ def cmd_demo(args: argparse.Namespace) -> int:
     pp = process_pass(trace, gps)
     sc = score_pass(pp)
     dets = detect_single_pass(pp)
-    print(f"cadence: {pp.f_step * 60:.1f} spm   windows: {pp.n_windows}   footfalls: {pp.footfalls.size}")
-    print("ground truth:", [(a.kind, a.start_m, a.end_m) for a in truth])
+    echo(f"cadence: {pp.f_step * 60:.1f} spm   windows: {pp.n_windows}   footfalls: {pp.footfalls.size}")
+    echo("ground truth:", [(a.kind, a.start_m, a.end_m) for a in truth])
     for d in dets:
-        print(
+        echo(
             f"  detected {d.direction:12s} {d.start_m:6.1f}-{d.end_m:6.1f} m "
             f" peak {d.peak_m:6.1f} m  z={d.score:.2f}"
         )
-    print(f"max |score| = {np.max(np.abs(sc.signed)):.2f}")
+    echo(f"max |score| = {np.max(np.abs(sc.signed)):.2f}")
     return 0
 
 
@@ -66,33 +68,46 @@ def cmd_scan(args: argparse.Namespace) -> int:
         scn = SurfaceScenario(seed=args.seed, anomalies=list(ROUTE_ANOMALIES), fs=args.demo_fs)
         trace, gps, truth = simulate_pass(scn)
         write_export_dir(sample_dir, trace, gps)
-        print(f"demo: wrote a Sensor Logger shaped export to {sample_dir}")
+        echo(f"demo: wrote a Sensor Logger shaped export to {sample_dir}")
         rec = load_recording(sample_dir)
     else:
         if not args.recording:
-            print("error: pass a recording path, or --demo to generate one")
+            echo("error: pass a recording path, or --demo to generate one")
             return 2
         rec = load_recording(Path(args.recording), Path(args.gps) if args.gps else None)
 
     result, _pp = scan_recording(rec, threshold=args.threshold)
-    print(format_report(result))
+    echo(format_report(result))
 
     if truth is not None and result.quality.usable:
         dets = detect_single_pass(_pp, threshold=args.threshold)
         ev = evaluate_detections(dets, truth)
-        print("ground truth:", [(a.kind, a.start_m, a.end_m) for a in truth])
+        echo("ground truth:", [(a.kind, a.start_m, a.end_m) for a in truth])
         loc = "n/a" if ev.mean_localization_error_m is None else f"{ev.mean_localization_error_m:.1f} m"
-        print(
+        echo(
             f"vs truth      precision {ev.precision:.2f}  recall {ev.recall:.2f}  "
             f"F1 {ev.f1:.2f}  loc err {loc}"
         )
 
     if args.out:
         path = write_output(result, Path(args.out), args.format, client_scan_id=args.client_scan_id)
-        print(f"wrote {path}")
+        echo(f"wrote {path}")
         if args.format == "map":
-            print("upload it with the map's “Import bridge scan” panel to create ROUGH_SURFACE reports")
+            echo("upload it with the map's “Import bridge scan” panel to create ROUGH_SURFACE reports")
     return 0 if result.quality.usable else 1
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Report what to change about the capture settings before the next recording."""
+    rec = load_recording(Path(args.recording), Path(args.gps) if args.gps else None)
+    d = diagnose(rec)
+    if args.json:
+        echo(json.dumps(d.as_dict(), indent=2, default=str))
+    else:
+        echo(format_diagnosis(d))
+    # A diagnosis is advice, not a gate: exit non-zero only when the recording
+    # cannot be scanned at all, so this is usable in a script before a walk.
+    return 0 if d.verdict != "unusable" else 1
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
@@ -116,10 +131,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
         )
         for outcomes in cycles:
             for outcome in outcomes:
-                print(json.dumps(outcome), flush=True)
+                echo(json.dumps(outcome), flush=True)
                 failures += outcome["status"] != "done"
     except SyncError as exc:
-        print(f"error: {exc}")
+        echo(f"error: {exc}")
         return 2
 
     return 1 if failures else 0
@@ -159,7 +174,7 @@ def cmd_plot(args: argparse.Namespace) -> int:
     fig.tight_layout()
     path = out / "single_pass_scores.png"
     fig.savefig(path, dpi=130)
-    print(f"wrote {path}")
+    echo(f"wrote {path}")
     return 0
 
 
@@ -199,6 +214,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ps.add_argument("--seed", type=int, default=1)
     ps.set_defaults(func=cmd_scan)
+
+    pdoc = sub.add_parser("doctor", help="check a recording's capture settings and say what to fix")
+    pdoc.add_argument("recording", help="export dir, .zip, or accelerometer CSV")
+    pdoc.add_argument("--gps", default=None, help="GPS CSV for a bare accelerometer CSV")
+    pdoc.add_argument("--json", action="store_true", help="emit the diagnosis as JSON")
+    pdoc.set_defaults(func=cmd_doctor)
 
     py = sub.add_parser("sync", help="process recordings uploaded to a Sensor Logger Study")
     py.add_argument("--limit", type=int, default=None, help="uploads to lease per cycle (max 25)")

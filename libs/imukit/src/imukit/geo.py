@@ -84,6 +84,27 @@ def distance_at_times(track: GpsTrack, t: np.ndarray, smooth_s: float = 5.0) -> 
     return np.interp(np.asarray(t, dtype=float), track.t, d)
 
 
+def median_speed_mps(track: GpsTrack, smooth_s: float = 5.0, window_s: float = 10.0) -> float:
+    """Median ground speed over the pass, in m/s.
+
+    Taken from the smoothed along-path distance over ``window_s`` blocks rather
+    than fix to fix: at 1 Hz the fix-to-fix difference is mostly positional
+    noise, and it is the median over blocks that survives a stop at a crossing.
+    Returns 0.0 when the track is too short to say anything.
+    """
+    if track.t.size < 3:
+        return 0.0
+    d = cumulative_distance(track, smooth_s=smooth_s)
+    dt = float(np.median(np.diff(track.t)))
+    n = max(1, int(round(window_s / max(dt, 1e-6))))
+    if d.size <= n:
+        span = float(track.t[-1] - track.t[0])
+        return float(d[-1] / span) if span > 0 else 0.0
+    speeds = (d[n:] - d[:-n]) / (track.t[n:] - track.t[:-n])
+    speeds = speeds[np.isfinite(speeds)]
+    return float(np.median(speeds)) if speeds.size else 0.0
+
+
 def position_at_distance(track: GpsTrack, distance_m, smooth_s: float = 5.0):
     """Inverse of :func:`cumulative_distance`: along-path metres -> (lat, lon).
 
