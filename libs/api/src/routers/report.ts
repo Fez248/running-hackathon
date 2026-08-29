@@ -5,8 +5,10 @@ import {
   confidence,
   createReportSchema,
   gridKey,
+  parseVoiceReport,
   passabilityForProfile,
   type Passability,
+  voiceReportSchema,
   voteSchema,
 } from '@sidewalk/core';
 import { createTRPCRouter, protectedProcedure, publicProcedure } from '../trpc';
@@ -68,11 +70,57 @@ export const reportRouter = createTRPCRouter({
         photoUrl: input.photoUrl ?? null,
         accuracyM: input.accuracyM ?? null,
         capturedByProfile: input.capturedByProfile ?? null,
+        source: input.source,
+        transcript: input.transcript ?? null,
+        traceId: input.traceId ?? null,
         clientReportId: input.clientReportId ?? null,
         authorId: ctx.user?.id ?? null,
         confidence: confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }),
       },
     });
+  }),
+
+  /**
+   * Ambient voice reporting: an utterance dictated while running, geocoded to the
+   * GPS fix it was spoken at. The server re-parses the transcript so the stored
+   * report never depends on the client's parser version, and returns `null` when
+   * the utterance named no sidewalk feature (ambient chatter).
+   */
+  createFromVoice: publicProcedure.input(voiceReportSchema).mutation(async ({ ctx, input }) => {
+    if (input.clientReportId) {
+      const existing = await ctx.prisma.report.findUnique({
+        where: { clientReportId: input.clientReportId },
+      });
+      if (existing) return { report: existing, parsed: null, ignored: false };
+    }
+
+    const parsed = parseVoiceReport(input.transcript, input.recognitionConfidence);
+    if (!parsed) return { report: null, parsed: null, ignored: true };
+
+    const report = await ctx.prisma.report.create({
+      data: {
+        lat: input.lat,
+        lng: input.lng,
+        gridKey: gridKey({ lat: input.lat, lng: input.lng }),
+        kind: input.kind ?? parsed.kind,
+        passability: input.passability ?? parsed.passability,
+        heightCm: parsed.heightCm ?? null,
+        widthCm: parsed.widthCm ?? null,
+        note: parsed.note,
+        accuracyM: input.accuracyM ?? null,
+        capturedByProfile: input.capturedByProfile ?? null,
+        source: 'VOICE',
+        transcript: input.transcript,
+        traceId: input.traceId ?? null,
+        clientReportId: input.clientReportId ?? null,
+        authorId: ctx.user?.id ?? null,
+        confidence:
+          confidence({ agreeCount: 0, disagreeCount: 0, accuracyM: input.accuracyM }) *
+          parsed.parseConfidence,
+      },
+    });
+
+    return { report, parsed, ignored: false };
   }),
 
   /** Offline queue flush: send everything captured while out of signal. */
@@ -93,6 +141,9 @@ export const reportRouter = createTRPCRouter({
           photoUrl: report.photoUrl ?? null,
           accuracyM: report.accuracyM ?? null,
           capturedByProfile: report.capturedByProfile ?? null,
+          source: report.source,
+          transcript: report.transcript ?? null,
+          traceId: report.traceId ?? null,
           clientReportId: report.clientReportId ?? null,
           authorId: ctx.user?.id ?? null,
           confidence: confidence({

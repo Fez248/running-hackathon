@@ -43,6 +43,10 @@ model Report {
   accuracyM Float?
   /// Profile of the reporter at capture time.
   capturedByProfile String?
+  /// MANUAL | VOICE — how the observation was captured.
+  source    String  @default("MANUAL")
+  /// Raw dictated utterance for a VOICE report, kept for auditing the parser.
+  transcript String?
   /// Idempotency key from the client so offline replays do not duplicate.
   clientReportId String? @unique
 
@@ -94,6 +98,33 @@ model Trace {
   endedAt   DateTime?
 
   reports Report[]
+  cells   CoverageCell[]
 
   @@index([userId])
+}
+
+/// A fog-of-war cell revealed by walking/running through it.
+/// `cellKey` comes from @sidewalk/core fogCellKey, so the grid is identical on
+/// every client and the key is the natural unique index SQLite can serve.
+model CoverageCell {
+  id        String @id @default(cuid())
+  cellKey   String @unique
+  /// Cell centre, denormalised so viewport queries stay indexed range scans.
+  lat       Float
+  lng       Float
+  /// How many accepted GPS fixes have landed in this cell.
+  visits    Int    @default(1)
+  /// Best (lowest) GPS accuracy in metres seen while revealing the cell.
+  bestAccuracyM Float?
+
+  traceId String?
+  trace   Trace?  @relation(fields: [traceId], references: [id], onDelete: SetNull)
+
+  userId String?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @updatedAt
+
+  @@index([lat, lng])
+  @@index([traceId])
 }
