@@ -48,6 +48,13 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def positive_float(text: str) -> float:
+    value = float(text)
+    if not np.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"expected a finite positive number, got {text!r}")
+    return value
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     """Scan a real (or, with --demo, a simulated) recording for floor imperfections."""
     truth = None
@@ -138,9 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     ps.add_argument("recording", nargs="?", help="export dir, .zip, or accelerometer CSV")
     ps.add_argument("--gps", default=None, help="GPS CSV (t,lat,lon[,accuracy_m]) for a bare accel CSV")
     ps.add_argument("--demo", action="store_true", help="generate and scan a simulated recording")
-    ps.add_argument("--demo-fs", type=float, default=200.0, help="demo IMU sample rate (Hz)")
+    ps.add_argument("--demo-fs", type=positive_float, default=200.0, help="demo IMU sample rate (Hz)")
     ps.add_argument("--sample-dir", default=None, help="where --demo writes the generated export")
-    ps.add_argument("--threshold", type=float, default=3.0, help="robust-z detection threshold")
+    ps.add_argument(
+        "--threshold", type=positive_float, default=3.0, help="robust-z detection threshold"
+    )
     ps.add_argument("--format", choices=["json", "geojson", "csv"], default="json")
     ps.add_argument("--out", default=None, help="write findings to this file")
     ps.add_argument("--seed", type=int, default=1)

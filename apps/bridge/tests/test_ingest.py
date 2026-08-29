@@ -142,6 +142,51 @@ def test_scan_of_a_good_recording_finds_and_locates_anomalies(tmp_path):
     assert to_csv(result).count("\n") == len(result.findings) + 1
 
 
+def test_vigorous_gravity_free_stream_still_fails_the_gate(tmp_path):
+    # Running-scale linear acceleration: mean |a| is well above 0.5 g even though
+    # gravity is gone, which is exactly what a mean-magnitude test would miss.
+    trace, gps, _ = _short_pass(length_m=200.0)
+    trace.accel = 3.0 * (trace.accel - np.mean(trace.accel, axis=0))
+    assert np.mean(np.linalg.norm(trace.accel, axis=1)) > 0.5 * 9.80665
+    write_export_dir(tmp_path / "rec", trace, gps)
+
+    q = assess(load_recording(tmp_path / "rec"))
+    assert not q.gravity_present
+    assert q.verdict == "unusable"
+
+
+def test_gps_free_recording_is_rejected_rather_than_located_at_zero(tmp_path):
+    trace, _gps, _ = _short_pass(length_m=200.0)
+    write_export_dir(tmp_path / "rec", trace, None)
+
+    result, pp = scan_recording(load_recording(tmp_path / "rec"))
+    assert pp is None
+    assert result.findings == []
+    assert any("GPS" in p for p in result.quality.problems)
+
+
+def test_nonpositive_threshold_is_rejected(tmp_path):
+    trace, gps, _ = _short_pass(length_m=120.0)
+    write_export_dir(tmp_path / "rec", trace, gps)
+    rec = load_recording(tmp_path / "rec")
+
+    for bad in (0.0, -1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            scan_recording(rec, threshold=bad)
+
+
+def test_zip_entries_cannot_escape_the_extraction_directory(tmp_path):
+    import zipfile
+
+    archive = tmp_path / "evil.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("../pwned.csv", "seconds_elapsed,x,y,z\n0.0,0.1,0.2,9.8\n")
+
+    with pytest.raises(ValueError, match="escapes"):
+        load_recording(archive)
+    assert not (tmp_path / "pwned.csv").exists()
+
+
 def test_position_at_distance_inverts_cumulative_distance():
     _trace, gps, _ = _short_pass(length_m=200.0, gps_noise_m=0.0)
     d = cumulative_distance(gps, smooth_s=5.0)

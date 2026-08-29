@@ -50,6 +50,11 @@ NS_THRESHOLD = 1e15
 MS_THRESHOLD = 1e11
 DEMO_EPOCH_NS = 1_700_000_000_000_000_000
 
+# An hour at 400 Hz is ~150 MB of CSV; anything far past that is not a pass we
+# can interpret, so refuse it rather than read it into memory.
+MAX_TABLE_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
+
 
 @dataclass
 class Recording:
@@ -71,6 +76,9 @@ def _normalize(name: str) -> str:
 
 def read_table(path: Path) -> dict[str, np.ndarray]:
     """Read a delimited text table into ``{normalized_header: float column}``."""
+    size = path.stat().st_size
+    if size > MAX_TABLE_BYTES:
+        raise ValueError(f"{path}: {size / 1e6:.0f} MB exceeds the {MAX_TABLE_BYTES / 1e6:.0f} MB limit")
     text = path.read_text(encoding="utf-8-sig", errors="replace")
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if len(lines) < 2:
@@ -177,9 +185,10 @@ def load_export_dir(directory: Path) -> Recording:
     gps_path = _find(directory, "location", "gps", "locationgps")
     gps = _gps_from_table(read_table(gps_path), t0) if gps_path else None
     if gps is None:
-        notes.append("no GPS track: detections are reported in seconds, not metres along the route.")
-    # phyphox headers are "Time (s)"; Sensor Logger ships an epoch-ns `time`.
-    fmt = "phyphox" if "time s" in cols else "sensorlogger"
+        notes.append("no GPS track: findings cannot be located along the route.")
+    # Sensor Logger ships `seconds_elapsed` next to its epoch-ns `time`; phyphox
+    # only has "Time (s)", which _normalize has already reduced to "time".
+    fmt = "sensorlogger" if "seconds elapsed" in cols else "phyphox"
     return Recording(trace=trace, gps=gps, source=str(directory), format=fmt, notes=notes)
 
 
@@ -189,7 +198,7 @@ def load_generic_csv(accel_csv: Path, gps_csv: Path | None = None) -> Recording:
     notes: list[str] = []
     gps = _gps_from_table(read_table(gps_csv), t0) if gps_csv else None
     if gps is None:
-        notes.append("no GPS track: detections are reported in seconds, not metres along the route.")
+        notes.append("no GPS track: findings cannot be located along the route.")
     return Recording(trace=trace, gps=gps, source=str(accel_csv), format="csv", notes=notes)
 
 
@@ -199,14 +208,30 @@ def load_recording(path: Path, gps_csv: Path | None = None) -> Recording:
     if path.is_dir():
         return load_export_dir(path)
     if path.suffix.lower() == ".zip":
-        tmp = Path(tempfile.mkdtemp(prefix="bridge-export-"))
-        with zipfile.ZipFile(path) as zf:
-            zf.extractall(tmp)
-        rec = load_export_dir(tmp)
+        with tempfile.TemporaryDirectory(prefix="bridge-export-") as tmp_name:
+            rec = load_export_dir(_extract_zip(path, Path(tmp_name)))
         return Recording(rec.trace, rec.gps, source=str(path), format=rec.format, notes=rec.notes)
     if not path.exists():
         raise FileNotFoundError(str(path))
     return load_generic_csv(path, gps_csv)
+
+
+def _extract_zip(path: Path, dest: Path) -> Path:
+    """Extract ``path`` under ``dest``, refusing traversal and oversized archives."""
+    with zipfile.ZipFile(path) as zf:
+        total = sum(info.file_size for info in zf.infolist())
+        if total > MAX_ARCHIVE_BYTES:
+            raise ValueError(
+                f"{path}: unpacks to {total / 1e6:.0f} MB, over the "
+                f"{MAX_ARCHIVE_BYTES / 1e6:.0f} MB limit"
+            )
+        root = dest.resolve()
+        for info in zf.infolist():
+            target = (root / info.filename).resolve()
+            if target != root and root not in target.parents:
+                raise ValueError(f"{path}: entry {info.filename!r} escapes the extraction directory")
+            zf.extract(info, root)
+    return dest
 
 
 def write_export_dir(directory: Path, trace: ImuTrace, gps: GpsTrack | None) -> Path:

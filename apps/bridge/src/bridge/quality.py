@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from imukit.geo import cumulative_distance
-from imukit.preprocess import G
+from imukit.preprocess import G, lowpass
 
 from .ingest import Recording
 
@@ -26,7 +26,22 @@ MAX_GPS_ERR_M = 3.0
 WARN_GPS_ERR_M = 5.0
 MIN_DURATION_S = 30.0
 MAX_DROPOUT_FRAC = 0.02
+GRAVITY_CUTOFF_HZ = 0.4
+GRAVITY_BAND_G = (0.5, 2.0)
 VERDICTS = ("ok", "degraded", "unusable")
+
+
+def _dc_magnitude(accel: np.ndarray, fs: float) -> float:
+    """Median magnitude of the sub-``GRAVITY_CUTOFF_HZ`` component of ``accel``.
+
+    Gait and orientation changes live above that cutoff, so the low-passed norm
+    is ~g for a gravity-carrying stream and ~0 for a linear/user-acceleration
+    one however vigorous the motion — the mean raw norm is not, because hard
+    running averages well above 0.5 g with gravity already removed.
+    """
+    if fs <= 4 * GRAVITY_CUTOFF_HZ or accel.shape[0] < 64:
+        return float(np.linalg.norm(np.mean(accel, axis=0)))
+    return float(np.median(np.linalg.norm(lowpass(accel, fs, GRAVITY_CUTOFF_HZ), axis=1)))
 
 
 @dataclass
@@ -72,15 +87,14 @@ def assess(rec: Recording) -> CaptureQuality:
     dt = np.diff(t)
     dt_med = float(np.median(dt)) if dt.size else 0.0
     fs = 1.0 / dt_med if dt_med > 0 else 0.0
-    # Gravity is a DC offset: the mean magnitude sits near g when it is present
-    # and near 0 for "linear"/"user" acceleration streams.
-    mean_mag = float(np.mean(np.linalg.norm(rec.trace.accel, axis=1)))
+    dc_mag = _dc_magnitude(rec.trace.accel, fs)
+    lo_g, hi_g = GRAVITY_BAND_G
     q = CaptureQuality(
         fs_hz=fs,
         jitter_ms=float(np.percentile(np.abs(dt - dt_med), 95) * 1e3) if dt.size else 0.0,
         dropout_frac=float(np.mean(dt > 3 * dt_med)) if dt.size else 0.0,
         duration_s=rec.trace.duration,
-        gravity_present=bool(mean_mag > 0.5 * G),
+        gravity_present=bool(lo_g * G < dc_mag < hi_g * G),
         clipping_frac=float(np.mean(np.max(np.abs(rec.trace.accel), axis=1) >= 4 * G)),
         gps_present=rec.gps is not None,
         gps_rate_hz=None,
@@ -95,7 +109,11 @@ def assess(rec: Recording) -> CaptureQuality:
     if q.duration_s < MIN_DURATION_S:
         _fail(q, f"pass is {q.duration_s:.0f} s; the robust baseline needs ≥{MIN_DURATION_S:.0f} s")
     if not q.gravity_present:
-        _fail(q, f"mean |a| is {mean_mag:.2f} m/s²: gravity removed, cannot project the vertical axis")
+        _fail(
+            q,
+            f"DC |a| is {dc_mag:.2f} m/s², not ~{G:.1f}: gravity removed (linear-acceleration "
+            "stream), so the vertical axis cannot be projected",
+        )
     if q.dropout_frac > MAX_DROPOUT_FRAC:
         _warn(q, f"{q.dropout_frac * 100:.1f}% of sample gaps are >3x nominal (dropped samples)")
     if q.clipping_frac > 0.001:
@@ -118,5 +136,5 @@ def assess(rec: Recording) -> CaptureQuality:
         else:
             _warn(q, "GPS track has no accuracy column; localization error is unknown")
     else:
-        _warn(q, "no GPS: anomalies are located in time only, so they cannot be mapped or re-visited")
+        _fail(q, "no usable GPS track: findings cannot be placed along the route, record GPS too")
     return q

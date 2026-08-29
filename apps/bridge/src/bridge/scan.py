@@ -75,6 +75,9 @@ class ScanResult:
 
 def scan_recording(rec: Recording, threshold: float = 3.0) -> tuple[ScanResult, ProcessedPass | None]:
     """Assess capture quality, run the single-pass detector, geo-locate findings."""
+    threshold = float(threshold)
+    if not np.isfinite(threshold) or threshold <= 0:
+        raise ValueError(f"threshold must be a finite positive robust-z value, got {threshold!r}")
     quality = assess(rec)
     notes = list(rec.notes)
     if not quality.usable:
