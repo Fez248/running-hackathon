@@ -65,9 +65,20 @@ export const sensorFindingSchema = z.object({
 });
 export type SensorFinding = z.infer<typeof sensorFindingSchema>;
 
+/**
+ * A recording's name without the path it happened to sit at. The bridge CLI is
+ * given a local path, and the scan history is world-readable like the rest of
+ * the map, so the home directory and username of whoever ran the detector must
+ * not travel with the scan.
+ */
+export function scanSourceLabel(source: string): string {
+  const name = source.split(/[/\\]/).filter(Boolean).pop() ?? '';
+  return name || 'recording';
+}
+
 export const scanIngestSchema = z.object({
-  /** Recording the findings came from (a directory or archive name). */
-  source: z.string().min(1).max(200),
+  /** Recording the findings came from; kept as a bare name, never a path. */
+  source: z.string().min(1).max(200).transform(scanSourceLabel),
   /** Recording layout `bridge.ingest` recognised (`sensor_logger`, `csv`, …). */
   format: z.string().min(1).max(40),
   quality: captureQualitySchema,
@@ -105,6 +116,12 @@ export interface SensorReportDraft {
   source: 'SENSOR';
   accuracyM: number | null;
   confidence: number;
+  /**
+   * The detector's own confidence, kept as a factor of its own so that a later
+   * vote recomputing the crowd/GPS part cannot silently promote a weak
+   * detection to the confidence of a human observation.
+   */
+  detectorConfidence: number;
   clientReportId: string;
 }
 
@@ -129,8 +146,8 @@ export function sensorFindingToReport(
     note,
     source: 'SENSOR',
     accuracyM,
-    confidence:
-      confidence({ agreeCount: 0, disagreeCount: 0, accuracyM }) * finding.confidence,
+    confidence: confidence({ agreeCount: 0, disagreeCount: 0, accuracyM }) * finding.confidence,
+    detectorConfidence: finding.confidence,
     clientReportId: sensorReportClientId(scan.clientScanId, finding.index),
   };
 }

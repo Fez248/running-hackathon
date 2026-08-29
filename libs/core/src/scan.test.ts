@@ -75,6 +75,13 @@ describe('scanIngestSchema', () => {
     ).toBeNull();
   });
 
+  it('reduces the recording to a bare name, path and all', () => {
+    expect(scan({ source: '/home/ada/Downloads/run 3.zip' }).source).toBe('run 3.zip');
+    expect(scan({ source: 'C:\\Users\\ada\\rec' }).source).toBe('rec');
+    expect(scan({ source: 'demo_pass' }).source).toBe('demo_pass');
+    expect(scan({ source: '/' }).source).toBe('recording');
+  });
+
   it('rejects a finding confidence outside 0..1', () => {
     expect(
       scanIngestSchema.safeParse({
@@ -101,6 +108,10 @@ describe('sensorFindingToReport', () => {
   it('leaves an absorbing finding for a human to judge', () => {
     const report = sensorFindingToReport({ ...FINDING, kind: 'compliant_or_absorbing' }, scan());
     expect(report.passability).toBe('UNKNOWN');
+  });
+
+  it('keeps the detector confidence as its own factor for later votes', () => {
+    expect(sensorFindingToReport(FINDING, scan()).detectorConfidence).toBe(0.8);
   });
 
   it('scales the crowd confidence by the detector confidence', () => {

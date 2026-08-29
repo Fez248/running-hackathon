@@ -87,10 +87,17 @@ Two rules the seam preserves:
 - **Re-uploading the same file changes nothing.** `clientScanId` defaults to a content hash
   of the scan and each report is keyed `<clientScanId>:<findingIndex>`, so ingest is
   idempotent; re-running the detector with a different `--threshold` is a different scan.
+  Concurrent uploads of one scan converge on the same scan and reports, and a scan and its
+  reports are written in one transaction, so a half-imported scan cannot block a retry.
+- **The recording is named, not located.** Only the recording's bare filename travels with
+  the payload; the scan history is as public as the map, so local paths and usernames stay
+  on the machine that ran the detector.
 
 Confidence of a sensor report is the usual GPS-weighted confidence of an unvoted report
 scaled by the detector's own confidence, so a weak detection from a degraded capture never
-outranks a human observation.
+outranks a human observation. The detector's factor is stored alongside the report and
+re-applied whenever votes recompute confidence, so agreement raises a sensed report from
+where the detector left it rather than to where a human report would sit.
 
 ## Turso / deployment
 

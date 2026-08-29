@@ -69,6 +69,17 @@ def test_map_payload_uses_the_map_field_names(tmp_path):
         assert finding["startM"] <= finding["peakM"] <= finding["endM"]
 
 
+def test_map_payload_names_the_recording_without_its_path(tmp_path):
+    result, _pp = scan_recording(_good_recording(tmp_path))
+    payload = to_map_payload(result)
+
+    # The scan history is world-readable, so the directory the scan was run
+    # from — and the username in it — must not travel with the upload.
+    assert payload["source"] == "rec"
+    assert "/" not in payload["source"]
+    assert str(tmp_path) not in json.dumps(payload)
+
+
 def test_map_payload_is_json_serialisable_without_a_fallback(tmp_path):
     result, _pp = scan_recording(_good_recording(tmp_path))
     reloaded = json.loads(json.dumps(to_map_payload(result)))

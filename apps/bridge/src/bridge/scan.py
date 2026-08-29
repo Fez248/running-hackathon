@@ -191,10 +191,13 @@ def to_map_payload(result: ScanResult, client_scan_id: str | None = None) -> dic
     place are omitted — a surface report without a position cannot go on a map —
     but the quality certificate is sent whatever the verdict, so the server can
     record (and refuse) an unusable capture rather than never hearing about it.
+
+    The recording is named, not located: ``source`` is reduced to a bare name so
+    an upload does not publish the home directory it was scanned from.
     """
     q = result.quality
     return {
-        "source": result.source,
+        "source": Path(result.source).name or result.source,
         "format": result.format,
         "quality": {
             "fsHz": q.fs_hz,

@@ -1,7 +1,43 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { gridKey, scanIngestSchema, sensorReportsForScan } from '@sidewalk/core';
-import { createTRPCRouter, publicProcedure } from '../trpc';
+import {
+  gridKey,
+  scanIngestSchema,
+  sensorReportsForScan,
+  type ScanIngestInput,
+} from '@sidewalk/core';
+import { createTRPCRouter, publicProcedure, type TRPCContext } from '../trpc';
+
+/** Prisma's unique-constraint failure. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: unknown }).code === 'P2002'
+  );
+}
+
+/**
+ * The answer for a scan that has already been imported, so an upload repeated
+ * — by a retry, a second tab or a concurrent request — resolves to the same
+ * scan and the same reports instead of creating or failing anything.
+ */
+async function resolveExisting(prisma: TRPCContext['prisma'], input: ScanIngestInput) {
+  const existing = await prisma.surfaceScan.findUnique({
+    where: { clientScanId: input.clientScanId },
+    include: { reports: { select: { id: true } } },
+  });
+  if (!existing) return null;
+
+  const { reports, ...scan } = existing;
+  return {
+    scan,
+    reportIds: reports.map((report) => report.id),
+    accepted: existing.verdict !== 'unusable',
+    problems: input.quality.problems,
+  };
+}
 
 /**
  * Surface scans from `apps/bridge`.
@@ -17,63 +53,71 @@ import { createTRPCRouter, publicProcedure } from '../trpc';
  */
 export const scanRouter = createTRPCRouter({
   ingest: publicProcedure.input(scanIngestSchema).mutation(async ({ ctx, input }) => {
-    const existing = await ctx.prisma.surfaceScan.findUnique({
-      where: { clientScanId: input.clientScanId },
-      include: { reports: { select: { id: true } } },
-    });
-    if (existing) {
-      return {
-        scan: { ...existing, reports: undefined },
-        reportIds: existing.reports.map((report) => report.id),
-        accepted: existing.verdict !== 'unusable',
-        problems: input.quality.problems,
-      };
-    }
+    const userId = ctx.user?.id ?? null;
+    const alreadyThere = await resolveExisting(ctx.prisma, input);
+    if (alreadyThere) return alreadyThere;
 
-    const drafts = sensorReportsForScan(input);
-    const accepted = input.quality.verdict !== 'unusable';
+    try {
+      // Scan and reports commit together: a scan row without its reports would
+      // be indistinguishable from a completed import and would make every
+      // retry a no-op, permanently losing the findings.
+      return await ctx.prisma.$transaction(async (tx) => {
+        const drafts = sensorReportsForScan(input);
+        const scan = await tx.surfaceScan.create({
+          data: {
+            clientScanId: input.clientScanId,
+            source: input.source,
+            format: input.format,
+            verdict: input.quality.verdict,
+            quality: JSON.stringify(input.quality),
+            cadenceSpm: input.cadenceSpm,
+            findingCount: input.findings.length,
+            reportCount: drafts.length,
+            uploadedById: userId,
+          },
+        });
 
-    const scan = await ctx.prisma.surfaceScan.create({
-      data: {
-        clientScanId: input.clientScanId,
-        source: input.source,
-        format: input.format,
-        verdict: input.quality.verdict,
-        quality: JSON.stringify(input.quality),
-        cadenceSpm: input.cadenceSpm,
-        findingCount: input.findings.length,
-        reportCount: drafts.length,
-        uploadedById: ctx.user?.id ?? null,
-      },
-    });
+        const reportIds: string[] = [];
+        for (const draft of drafts) {
+          // Upsert for the same reason report.create does: a retried upload
+          // must deduplicate instead of hitting the unique index.
+          const row = await tx.report.upsert({
+            where: { clientReportId: draft.clientReportId },
+            update: {},
+            create: {
+              lat: draft.lat,
+              lng: draft.lng,
+              gridKey: gridKey({ lat: draft.lat, lng: draft.lng }),
+              kind: draft.kind,
+              passability: draft.passability,
+              note: draft.note,
+              accuracyM: draft.accuracyM,
+              source: draft.source,
+              confidence: draft.confidence,
+              detectorConfidence: draft.detectorConfidence,
+              clientReportId: draft.clientReportId,
+              surfaceScanId: scan.id,
+              authorId: userId,
+            },
+          });
+          reportIds.push(row.id);
+        }
 
-    const reportIds: string[] = [];
-    for (const draft of drafts) {
-      const data = {
-        lat: draft.lat,
-        lng: draft.lng,
-        gridKey: gridKey({ lat: draft.lat, lng: draft.lng }),
-        kind: draft.kind,
-        passability: draft.passability,
-        note: draft.note,
-        accuracyM: draft.accuracyM,
-        source: draft.source,
-        confidence: draft.confidence,
-        clientReportId: draft.clientReportId,
-        surfaceScanId: scan.id,
-        authorId: ctx.user?.id ?? null,
-      };
-      // Upsert for the same reason report.create does: a retried upload racing
-      // the first one must deduplicate instead of hitting the unique index.
-      const row = await ctx.prisma.report.upsert({
-        where: { clientReportId: draft.clientReportId },
-        update: {},
-        create: data,
+        return {
+          scan,
+          reportIds,
+          accepted: input.quality.verdict !== 'unusable',
+          problems: input.quality.problems,
+        };
       });
-      reportIds.push(row.id);
+    } catch (error) {
+      // Two uploads of one scan can both pass the lookup above; the loser of
+      // the unique index is still an idempotent upload, not a failure.
+      if (!isUniqueViolation(error)) throw error;
+      const winner = await resolveExisting(ctx.prisma, input);
+      if (!winner) throw error;
+      return winner;
     }
-
-    return { scan, reportIds, accepted, problems: input.quality.problems };
   }),
 
   /** Uploaded scans, newest first, for the scan history panel. */

@@ -70,6 +70,9 @@ model Report {
   traceId String?
   trace   Trace?  @relation(fields: [traceId], references: [id], onDelete: SetNull)
 
+  /// Detector confidence of a SENSOR report, kept apart from `confidence` so a
+  /// vote recomputing the crowd/GPS part cannot drop the detector's own doubt.
+  detectorConfidence Float?
   /// Bridge scan a SENSOR report was derived from.
   surfaceScanId String?
   surfaceScan   SurfaceScan? @relation(fields: [surfaceScanId], references: [id], onDelete: SetNull)
